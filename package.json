@@ -13,17 +13,22 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "dev:ssh": "node scripts/dev-ssh-server.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/ssh2": "^1.15.6",
     "@vitejs/plugin-react": "^6.1.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^6.0.0",

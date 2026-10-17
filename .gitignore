@@ -13,3 +13,6 @@ id_rsa*
 id_ed25519*
 id_ecdsa*
 *.tsbuildinfo
+
+# Host key for the local dev SSH server (npm run dev:ssh)
+.dev-ssh/

@@ -4,12 +4,12 @@ A program for connecting to multiple SSH clients at once (see [README.md](README
 
 ## Project status
 
-Phase 0 (scaffold) is done: an empty app window with placeholder layout. Next is Phase 1 (single-device SSH connect). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0 (scaffold) and 1 (single-device SSH connect) are done: saved devices, password/key auth, host-key trust, and one interactive terminal at a time. Next is Phase 2 (multi-device grid and paging). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
 - **App:** Electron + TypeScript, React for the UI
-- **Terminal / SSH:** `xterm.js` (terminal UI) + `ssh2` (SSH client); not installed yet, added in Phase 1
+- **Terminal / SSH:** `@xterm/xterm` + `@xterm/addon-fit` (terminal UI) + `ssh2` (SSH client, pure-JS; its optional native crypto build is skipped)
 - **Bundler:** `electron-vite` (Vite for main, preload and renderer)
 - **Tests:** Vitest
 - **Packaging:** electron-builder (Windows NSIS installer + portable)
@@ -23,16 +23,33 @@ v1 is SSH only, but all connections go through a transport interface so telnet, 
 - `npm test`: run Vitest once (`npm run test:watch` to watch)
 - `npm run build`: typecheck and build to `out/`
 - `npm run dist`: build a Windows installer and portable exe into `dist/`
+- `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225). Any username, password `dev`. It runs a fake shell (`help`, `echo`, `size`, …), never a real one; its host key lives in `.dev-ssh/` (gitignored).
 
 The Electron binary downloads itself on first run if missing (`node node_modules/electron/install.js` forces it).
 
 ## Layout
 
-- `src/main/`: Electron main process (window, IPC handlers; SSH sessions will live here)
+- `src/main/`: Electron main process
+  - `index.ts`: window, host-key confirmation dialogs, wiring
+  - `ipc.ts`: all IPC handlers; validates every argument and rejects other senders
+  - `sessionManager.ts`: one session per device (keyed by deviceId), credentials, host-key checks
+  - `transport/`: `Transport` interface + `SshTransport`; new protocols go here
+  - `deviceStore.ts`, `knownHosts.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`)
 - `src/preload/`: the only renderer bridge, exposed as `window.bulkssh`; types in `index.d.ts`
-- `src/renderer/`: React UI (`index.html`, `src/`)
-- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (e.g. `paging.ts`)
-- `tests/`: Vitest tests
+- `src/renderer/src/`: React UI. `terminals.ts` keeps one xterm instance per device outside React so scrollback survives re-renders; `components/` holds the device list, form, password prompt and terminal view
+- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`)
+- `tests/`: Vitest tests. `tests/helpers/sshServer.ts` is an in-process ssh2 server used by `sessionManager.test.ts`
+- `scripts/dev-ssh-server.mjs`: the `npm run dev:ssh` server
+
+## Secrets and host keys
+
+- Passwords and key passphrases are asked for at connect time and passed straight through; they are never written to disk or kept in renderer state. `devices.json` holds only host, port, username and key *path*.
+- Host keys are trust-on-first-use: unknown keys and changed keys both show a native dialog in the main process (the renderer cannot answer it). Never add a path that accepts keys silently.
+
+## Gotchas
+
+- `ssh2`'s `utils.generateKeyPairSync('ed25519')` produces a malformed key about 1 time in 200 (OpenSSH rejects it too). Tests use `generateKeys()` from the test helper, which retries. Real keys from `ssh-keygen` are unaffected.
+- When driving the Electron window over CDP for checks, a window hidden behind others reports `visibilityState: hidden` and xterm stops repainting. Launch with `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows`, and use `--user-data-dir=<temp dir>` so test devices don't land in the real app data.
 
 ## Electron security rules
 

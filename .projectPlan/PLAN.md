@@ -81,7 +81,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Choose bundler/UI framework, test runner, packager; scaffold the project; add build/run/test commands to `CLAUDE.md`
 - Done when: an empty app window launches with one command
 
-**Phase 1: Single-device connect**
+**Phase 1: Single-device connect** (done 2026-10-17; also pulled in host-key trust-on-first-use from Phase 5 and keyboard-interactive auth for network gear)
 - Device model and JSON store; add/edit/delete form
 - Transport interface and `SshTransport`; connect to one device and show an xterm.js terminal
 - Done when: an interactive shell works against a real or test SSH server
