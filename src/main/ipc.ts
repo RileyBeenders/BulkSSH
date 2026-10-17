@@ -3,9 +3,15 @@ import type { DeviceInput } from '@shared/device'
 import type { ConnectRequest } from '@shared/session'
 import type { DeviceStore } from './deviceStore'
 import type { SessionManager } from './sessionManager'
+import type { SettingsStore } from './settingsStore'
 
 // Every IPC message is validated here: the renderer is treated as untrusted input.
-export function registerIpc(win: BrowserWindow, devices: DeviceStore, sessions: SessionManager): void {
+export function registerIpc(
+  win: BrowserWindow,
+  devices: DeviceStore,
+  sessions: SessionManager,
+  settings: SettingsStore
+): void {
   const fromWindow = (e: IpcMainEvent | IpcMainInvokeEvent): boolean => e.sender === win.webContents
 
   const handle = <A extends unknown[], R>(channel: string, fn: (...args: A) => R): void => {
@@ -16,6 +22,9 @@ export function registerIpc(win: BrowserWindow, devices: DeviceStore, sessions: 
   }
 
   handle('app:version', () => app.getVersion())
+
+  handle('settings:get', () => settings.get())
+  handle('settings:save', (input: unknown) => settings.save(input))
 
   handle('devices:list', () => devices.list())
   handle('devices:save', (input: DeviceInput) => devices.save(input))

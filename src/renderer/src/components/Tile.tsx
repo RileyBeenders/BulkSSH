@@ -1,0 +1,57 @@
+import type { Device } from '@shared/device'
+import type { SessionStatus } from '@shared/session'
+import { TerminalView } from './TerminalView'
+
+const STATUS_TEXT: Record<SessionStatus, string> = {
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  closed: 'Disconnected',
+  error: 'Error'
+}
+
+interface Props {
+  device: Device
+  number: number
+  status: SessionStatus | undefined
+  active: boolean
+  onActivate: () => void
+  onConnect: () => void
+  onDisconnect: () => void
+  onClose: () => void
+}
+
+// One device's live terminal in the grid.
+export function Tile(props: Props): React.JSX.Element {
+  const { device, status } = props
+  const live = status === 'connecting' || status === 'connected'
+
+  return (
+    <section
+      className={`tile${props.active ? ' active' : ''}`}
+      aria-label={`${props.number}: ${device.name}`}
+      onFocus={props.onActivate}
+      onMouseDown={props.onActivate}
+    >
+      <header className="tile-header">
+        <span className="num">{props.number}</span>
+        <span className={`dot ${status ?? 'idle'}`} />
+        <span className="name">{device.name}</span>
+        <span className={`status ${status ?? 'idle'}`}>{status ? STATUS_TEXT[status] : 'Not connected'}</span>
+        <span className="grow" />
+        {live ? (
+          <button onClick={props.onDisconnect} title="Disconnect" aria-label={`Disconnect ${device.name}`}>
+            ■
+          </button>
+        ) : (
+          <button className="primary" onClick={props.onConnect} title="Reconnect" aria-label={`Reconnect ${device.name}`}>
+            ▶
+          </button>
+        )}
+        <button onClick={props.onClose} title="Close tile" aria-label={`Close ${device.name}`}>
+          ✕
+        </button>
+      </header>
+      <TerminalView deviceId={device.id} />
+    </section>
+  )
+}

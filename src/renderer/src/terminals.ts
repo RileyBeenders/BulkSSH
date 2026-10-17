@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { bridge } from './bridge'
 
 // One xterm.js terminal per device, kept outside React so scrollback survives
-// switching between devices (and, later, between grid and focus views).
+// switching pages (and, later, between grid and focus views).
 
 interface Entry {
   term: Terminal
@@ -15,8 +15,21 @@ interface Entry {
 const entries = new Map<string, Entry>()
 let unsubscribe: (() => void) | null = null
 
+// Shortcuts the app handles even while a terminal has focus.
+export function isAppShortcut(e: KeyboardEvent): boolean {
+  return e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')
+}
+
+export function hasTerminal(deviceId: string): boolean {
+  return entries.has(deviceId)
+}
+
 export function getTerminal(deviceId: string): Terminal {
   return entry(deviceId).term
+}
+
+export function focusTerminal(deviceId: string): void {
+  entries.get(deviceId)?.term.focus()
 }
 
 // Mounts the device's terminal into `container`; returns a detach function.
@@ -31,7 +44,6 @@ export function attachTerminal(deviceId: string, container: HTMLElement): () => 
     if (container.clientWidth > 0 && container.clientHeight > 0) e.fit.fit()
   }
   refit()
-  e.term.focus()
   const observer = new ResizeObserver(refit)
   observer.observe(container)
   return () => {
@@ -54,12 +66,14 @@ function entry(deviceId: string): Entry {
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"Cascadia Mono", Consolas, monospace',
-      fontSize: 14,
+      fontSize: 13,
       scrollback: 5000,
       theme: { background: '#0f1115' }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // Returning false lets the key bubble to the app instead of the device.
+    term.attachCustomKeyEventHandler((ev) => !isAppShortcut(ev))
     term.onData((data) => bridge?.session.write(deviceId, data))
     term.onResize(({ cols, rows }) => bridge?.session.resize(deviceId, cols, rows))
     const el = document.createElement('div')

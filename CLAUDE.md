@@ -4,7 +4,7 @@ A program for connecting to multiple SSH clients at once (see [README.md](README
 
 ## Project status
 
-Phases 0 (scaffold) and 1 (single-device SSH connect) are done: saved devices, password/key auth, host-key trust, and one interactive terminal at a time. Next is Phase 2 (multi-device grid and paging). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0–2 are done: saved devices, password/key auth, host-key trust, and a paged grid of live terminal tiles (connect/disconnect all, configurable devices per page). Next is Phase 3 (keystroke mirroring and command broadcast). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
@@ -34,12 +34,22 @@ The Electron binary downloads itself on first run if missing (`node node_modules
   - `ipc.ts`: all IPC handlers; validates every argument and rejects other senders
   - `sessionManager.ts`: one session per device (keyed by deviceId), credentials, host-key checks
   - `transport/`: `Transport` interface + `SshTransport`; new protocols go here
-  - `deviceStore.ts`, `knownHosts.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`)
+  - `deviceStore.ts`, `knownHosts.ts`, `settingsStore.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`, `settings.json`)
 - `src/preload/`: the only renderer bridge, exposed as `window.bulkssh`; types in `index.d.ts`
-- `src/renderer/src/`: React UI. `terminals.ts` keeps one xterm instance per device outside React so scrollback survives re-renders; `components/` holds the device list, form, password prompt and terminal view
-- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`)
+- `src/renderer/src/`: React UI
+  - `App.tsx`: state for devices, open tiles, paging, the active tile and the password-prompt queue
+  - `terminals.ts`: one xterm instance per device, kept outside React; tiles attach/detach its DOM node, so page switches keep scrollback and don't resize terminals. App shortcuts (`isAppShortcut`, currently Ctrl+PageUp/PageDown) are blocked from reaching the device
+  - `components/`: `DeviceList`, `Tile`, `Pager`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
+- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`)
 - `tests/`: Vitest tests. `tests/helpers/sshServer.ts` is an in-process ssh2 server used by `sessionManager.test.ts`
 - `scripts/dev-ssh-server.mjs`: the `npm run dev:ssh` server
+
+## Grid behavior
+
+- Pages cover *open* devices (ones with a tile), ordered by device number, not all saved devices. A tile stays after its device disconnects until the user closes it.
+- The grid shape comes from `gridShape(min(pageSize, open))`, so every page has the same tile size and switching pages never resizes terminals.
+- "Connect all" queues password prompts one at a time; the prompt offers to reuse the password for the other waiting devices. The password lives only in that call, never in state.
+- Host-key dialogs are queued in the main process so bulk connects never stack them.
 
 ## Secrets and host keys
 

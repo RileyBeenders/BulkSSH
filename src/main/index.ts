@@ -4,6 +4,7 @@ import { DeviceStore } from './deviceStore'
 import { registerIpc } from './ipc'
 import { KnownHosts } from './knownHosts'
 import { SessionManager } from './sessionManager'
+import { SettingsStore } from './settingsStore'
 import type { HostKeyCheck } from './knownHosts'
 import type { HostKeyInfo } from './transport/types'
 
@@ -42,6 +43,15 @@ function createWindow(): BrowserWindow {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
   return win
+}
+
+// Connecting many devices at once can raise several host-key questions;
+// show them one at a time instead of stacking dialogs.
+let dialogQueue: Promise<unknown> = Promise.resolve()
+function queueDialog<T>(show: () => Promise<T>): Promise<T> {
+  const next = dialogQueue.then(show, show)
+  dialogQueue = next.catch(() => undefined)
+  return next
 }
 
 async function confirmHostKey(
@@ -93,11 +103,11 @@ app.whenReady().then(() => {
   sessions = new SessionManager({
     devices,
     knownHosts: new KnownHosts(join(userData, 'known_hosts.json')),
-    confirmHostKey: (info, check) => confirmHostKey(win, info, check),
+    confirmHostKey: (info, check) => queueDialog(() => confirmHostKey(win, info, check)),
     onStatus: (event) => send('session:status', event),
     onData: (event) => send('session:data', event)
   })
-  registerIpc(win, devices, sessions)
+  registerIpc(win, devices, sessions, new SettingsStore(join(userData, 'settings.json')))
 })
 
 app.on('before-quit', () => sessions?.closeAll())

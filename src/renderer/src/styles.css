@@ -107,8 +107,23 @@ input:focus {
   font-weight: 600;
 }
 
-.version {
-  margin: auto 0 0;
+.bulk-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.bulk-actions button {
+  flex: 1;
+  font-size: 12px;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
   padding-top: 8px;
 }
 
@@ -167,6 +182,18 @@ input:focus {
 .row-actions {
   display: flex;
   gap: 4px;
+  visibility: hidden;
+}
+
+.device-list li:hover .row-actions,
+.device-list li:focus-within .row-actions,
+.device-list li.selected .row-actions {
+  visibility: visible;
+}
+
+.device-list li.open .name {
+  color: #fff;
+  font-weight: 600;
 }
 
 .row-actions button {
@@ -203,16 +230,83 @@ input:focus {
   min-height: 0;
 }
 
-.session-header {
+.toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
 }
 
-.session-header .name {
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pager button {
+  min-width: 28px;
+  padding: 2px 8px;
+}
+
+.pager button.current {
+  background: var(--selected);
+  border-color: var(--accent);
+}
+
+.pager .muted {
+  margin-left: 6px;
+}
+
+.grid {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  min-height: 0;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--term-bg);
+}
+
+.tile.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.tile-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.tile-header .num {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tile-header .name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile-header button {
+  padding: 1px 6px;
+  font-size: 12px;
 }
 
 .status {
@@ -235,7 +329,7 @@ input:focus {
 .terminal {
   flex: 1;
   min-height: 0;
-  padding: 6px;
+  padding: 4px;
   background: var(--term-bg);
 }
 

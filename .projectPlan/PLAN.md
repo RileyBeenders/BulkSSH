@@ -86,7 +86,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Transport interface and `SshTransport`; connect to one device and show an xterm.js terminal
 - Done when: an interactive shell works against a real or test SSH server
 
-**Phase 2: Multi-device grid and paging**
+**Phase 2: Multi-device grid and paging** (done 2026-10-17)
 - Device table with status dots; connect/disconnect many devices
 - Grid of live tiles; settings for max devices per page; page navigation
 - Done when: 10+ devices spread over several pages, each tile live, with fast page switching

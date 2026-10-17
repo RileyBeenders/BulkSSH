@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DeviceStore } from '../src/main/deviceStore'
 import { KnownHosts } from '../src/main/knownHosts'
+import { SettingsStore } from '../src/main/settingsStore'
 
 let dir: string
 beforeEach(() => {
@@ -76,5 +77,22 @@ describe('KnownHosts', () => {
     const hosts = new KnownHosts(join(dir, 'known_hosts.json'))
     hosts.trust(info)
     expect(hosts.check({ ...info, port: 2222 }).result).toBe('unknown')
+  })
+})
+
+describe('SettingsStore', () => {
+  it('defaults to 6 per page, saves and reloads', () => {
+    const path = join(dir, 'settings.json')
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 6 })
+    new SettingsStore(path).save({ pageSize: 9 })
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 9 })
+  })
+
+  it('rejects invalid settings without changing the saved ones', () => {
+    const path = join(dir, 'settings.json')
+    const store = new SettingsStore(path)
+    store.save({ pageSize: 4 })
+    expect(() => store.save({ pageSize: 100 })).toThrow('Devices per page')
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 4 })
   })
 })

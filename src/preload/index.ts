@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { Device, DeviceInput } from '@shared/device'
+import type { Settings } from '@shared/settings'
 import type {
   ConnectRequest,
   ConnectResult,
@@ -18,6 +19,11 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
+  settings: {
+    get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+    save: (settings: Settings): Promise<Settings> => ipcRenderer.invoke('settings:save', settings)
+  },
 
   devices: {
     list: (): Promise<Device[]> => ipcRenderer.invoke('devices:list'),
