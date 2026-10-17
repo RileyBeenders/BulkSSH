@@ -15,6 +15,8 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
-    resolve: { alias: shared }
+    resolve: { alias: shared },
+    // Fixed port so .claude/launch.json can find the dev server.
+    server: { port: 5173, strictPort: true }
   }
 })

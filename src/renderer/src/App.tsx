@@ -5,7 +5,8 @@ export function App(): React.JSX.Element {
   const [version, setVersion] = useState('')
 
   useEffect(() => {
-    void window.bulkssh.getVersion().then(setVersion)
+    // The bridge is missing when the renderer is opened in a plain browser (dev preview).
+    void window.bulkssh?.getVersion().then(setVersion)
   }, [])
 
   return (
