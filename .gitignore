@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+*.log
+.env*
+
+# Local device lists, settings and keys must never be committed
+/devices.json
+/settings.json
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.tsbuildinfo
