@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, session as electronSession, shell } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage, session as electronSession, shell } from 'electron'
+import { CredentialStore } from './credentialStore'
 import { DeviceStore } from './deviceStore'
 import { registerIpc } from './ipc'
 import { KnownHosts } from './knownHosts'
@@ -36,6 +37,13 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+
+  // SSH sessions live in this process, so if the page crashes, reload it; the
+  // new page picks the sessions up again (see session:list).
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error(`Renderer gone (${details.reason}, exit code ${details.exitCode}); reloading`)
+    if (details.reason !== 'clean-exit' && !win.isDestroyed()) win.webContents.reload()
+  })
 
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -105,6 +113,13 @@ app.whenReady().then(() => {
   const win = createWindow()
   const userData = app.getPath('userData')
   const devices = new DeviceStore(join(userData, 'devices.json'))
+  const settings = new SettingsStore(join(userData, 'settings.json'))
+  // OS-encrypted (DPAPI on Windows); only ciphertext reaches the disk.
+  const credentials = new CredentialStore(join(userData, 'credentials.json'), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (encrypted) => safeStorage.decryptString(encrypted)
+  })
   const send = (channel: string, payload: unknown): void => {
     if (!win.isDestroyed()) win.webContents.send(channel, payload)
   }
@@ -114,9 +129,11 @@ app.whenReady().then(() => {
     knownHosts: new KnownHosts(join(userData, 'known_hosts.json')),
     confirmHostKey: (info, check) => queueDialog(() => confirmHostKey(win, info, check)),
     onStatus: (event) => send('session:status', event),
-    onData: (event) => send('session:data', event)
+    onData: (event) => send('session:data', event),
+    credentials,
+    autoReconnect: () => settings.get().autoReconnect
   })
-  registerIpc(win, devices, sessions, new SettingsStore(join(userData, 'settings.json')))
+  registerIpc({ win, devices, sessions, settings, credentials })
 })
 
 app.on('before-quit', () => sessions?.closeAll())

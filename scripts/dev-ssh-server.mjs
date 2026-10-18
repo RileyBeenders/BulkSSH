@@ -2,13 +2,15 @@
 //
 //   npm run dev:ssh                 -> one server on 127.0.0.1:2222
 //   npm run dev:ssh -- --count 4    -> servers on 2222..2225
+//   npm run dev:ssh -- --password x -> use "x" instead of "dev"
 //
 // Login with any username and the password "dev". The shell is a small fake
 // shell (no access to this machine): help, echo, whoami, hostname, date,
 // size, sleep, fail, fail-on, clear, exit. The same commands work as exec
 // commands (BulkSSH broadcast) and return real exit codes. `tui` (shell
 // only) is a full-screen test program standing in for vim/top: alternate
-// screen, redraw on resize, colours, arrow keys and a cursor-position query. The host key is
+// screen, redraw on resize, colours, arrow keys and a cursor-position query.
+// `drop` (shell only) cuts the connection, to try auto-reconnect. The host key is
 // kept in .dev-ssh/ so it stays trusted across restarts.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -17,7 +19,8 @@ import { join } from 'node:path'
 import ssh2 from 'ssh2'
 
 const { Server, utils } = ssh2
-const PASSWORD = 'dev'
+const passwordArg = process.argv.indexOf('--password')
+const PASSWORD = passwordArg > 0 && process.argv[passwordArg + 1] ? process.argv[passwordArg + 1] : 'dev'
 const BASE_PORT = 2222
 
 const countArg = process.argv.indexOf('--count')
@@ -68,7 +71,9 @@ function startServer(port, hostname) {
           for (const fn of resizeListeners) fn()
           ok?.()
         })
-        session.on('shell', (ok) => fakeShell(ok(), { username, hostname, size, onResize }))
+        // `drop` ends the whole connection abruptly, like a network failure.
+        const drop = () => client.end()
+        session.on('shell', (ok) => fakeShell(ok(), { username, hostname, size, onResize, drop }))
         session.on('exec', async (ok, _no, info) => {
           const channel = ok()
           const ctx = { username, hostname, size }
@@ -110,6 +115,7 @@ function fakeShell(channel, ctx) {
         channel.write('\r\n')
         const cmd = line.trim()
         line = ''
+        if (cmd === 'drop') return ctx.drop()
         if (cmd === 'tui') {
           tui = startTui(channel, ctx, () => {
             tui = null
@@ -215,7 +221,7 @@ async function runCommand(cmd, ctx, out, err, interrupted = () => false) {
       return 0
     case 'help':
       out('Commands: help, echo <text>, whoami, hostname, date, size, sleep <s>,')
-      out('          fail [code], fail-on <device number> [code], tui, clear, exit')
+      out('          fail [code], fail-on <device number> [code], tui, drop, clear, exit')
       return 0
     case 'echo':
       out(args.join(' '))

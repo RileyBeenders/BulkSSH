@@ -60,20 +60,25 @@ describe('gridShape', () => {
 
 describe('settings', () => {
   it('validates the page size range', () => {
-    const ok = { pageSize: 6, broadcastTimeoutSec: 30 }
+    const ok = { pageSize: 6, broadcastTimeoutSec: 30, autoReconnect: true }
     expect(validateSettings(ok)).toEqual([])
     expect(validateSettings({ ...ok, pageSize: 0 })).toHaveLength(1)
     expect(validateSettings({ ...ok, pageSize: 37 })).toHaveLength(1)
     expect(validateSettings({ ...ok, pageSize: 2.5 })).toHaveLength(1)
     expect(validateSettings({ ...ok, broadcastTimeoutSec: 0 })).toHaveLength(1)
     expect(validateSettings({ ...ok, broadcastTimeoutSec: 3601 })).toHaveLength(1)
+    expect(validateSettings({ ...ok, autoReconnect: 'yes' })).toHaveLength(1)
     expect(validateSettings(null)).toEqual(['Settings must be an object'])
   })
 
   it('normalizes missing or bad values to defaults and drops extra fields', () => {
     expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS)
     expect(normalizeSettings({ pageSize: 'lots', extra: true })).toEqual(DEFAULT_SETTINGS)
-    expect(normalizeSettings({ pageSize: 9, extra: true })).toEqual({ pageSize: 9, broadcastTimeoutSec: 30 })
-    expect(normalizeSettings({ pageSize: 9, broadcastTimeoutSec: 5 })).toEqual({ pageSize: 9, broadcastTimeoutSec: 5 })
+    expect(normalizeSettings({ pageSize: 9, extra: true })).toEqual({ pageSize: 9, broadcastTimeoutSec: 30, autoReconnect: true })
+    expect(normalizeSettings({ pageSize: 9, broadcastTimeoutSec: 5, autoReconnect: false })).toEqual({
+      pageSize: 9,
+      broadcastTimeoutSec: 5,
+      autoReconnect: false
+    })
   })
 })

@@ -218,6 +218,23 @@ input:focus {
   background: var(--warn);
 }
 
+.dot.reconnecting {
+  background: var(--warn);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.reconnecting {
+    animation: none;
+  }
+}
+
 .dot.error {
   background: var(--err);
 }
@@ -334,6 +351,10 @@ input:focus {
 }
 
 .status.connecting {
+  color: var(--warn);
+}
+
+.status.reconnecting {
   color: var(--warn);
 }
 
@@ -572,6 +593,36 @@ input:focus {
   white-space: pre-wrap;
   word-break: break-word;
   background: var(--term-bg);
+}
+
+/* Confirmation of risky commands */
+
+.danger-command {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--term-bg);
+  border: 1px solid var(--err);
+  border-radius: 4px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.danger-reasons {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--err);
+}
+
+button.danger-button {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+.saved-row {
+  align-items: center;
 }
 
 /* Modal + forms */

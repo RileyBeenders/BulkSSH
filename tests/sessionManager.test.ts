@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { SessionStatusEvent } from '@shared/session'
+import { CredentialStore } from '../src/main/credentialStore'
 import { DeviceStore } from '../src/main/deviceStore'
 import { KnownHosts } from '../src/main/knownHosts'
 import { SessionManager, type SessionManagerDeps } from '../src/main/sessionManager'
 import { generateKeys, startTestServer, waitFor, type TestServer } from './helpers/sshServer'
+import { fakeCipher } from './stores.test'
 
 let dir: string
 let server: TestServer | null
@@ -243,5 +245,157 @@ describe('SessionManager mirroring and broadcast', () => {
   it('reports devices that are not connected', async () => {
     const device = addDevice(1)
     expect(await manager.exec(device.id, 'uptime', 5000)).toEqual({ ok: false, message: 'Not connected', durationMs: 0 })
+  })
+})
+
+describe('SessionManager saved credentials', () => {
+  let credentials: CredentialStore
+  beforeEach(() => {
+    credentials = new CredentialStore(join(dir, 'credentials.json'), fakeCipher())
+    manager = new SessionManager({
+      devices,
+      knownHosts,
+      confirmHostKey,
+      credentials,
+      onStatus: (e) => statuses.push(e),
+      onData: (e) => (output += Buffer.from(e.data).toString())
+    })
+  })
+
+  it('saves the password only after a successful login when asked to', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    await manager.connect({ deviceId: device.id, secret: 'wrong', remember: true, cols: 80, rows: 24 })
+    expect(credentials.has(device.id)).toBe(false)
+    await manager.connect({ deviceId: device.id, secret: 'pw', remember: true, cols: 80, rows: 24 })
+    expect(credentials.get(device.id)).toBe('pw')
+  })
+
+  it('connects with the saved password when none is given', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    credentials.set(device.id, 'pw')
+    expect(await manager.connect({ deviceId: device.id, cols: 80, rows: 24 })).toEqual({ ok: true })
+  })
+
+  it('forgets a saved password the device rejects and asks again', async () => {
+    server = await startTestServer({ username: 'alice', password: 'new-pw' })
+    const device = addDevice(server.port)
+    credentials.set(device.id, 'old-pw')
+    expect(await manager.connect({ deviceId: device.id, cols: 80, rows: 24 })).toEqual({
+      ok: false,
+      message: 'The saved password was rejected; enter it again',
+      needsSecret: true
+    })
+    expect(credentials.has(device.id)).toBe(false)
+  })
+
+  it('forgets the saved secret when remember is turned off', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    credentials.set(device.id, 'pw')
+    await manager.connect({ deviceId: device.id, secret: 'pw', remember: false, cols: 80, rows: 24 })
+    expect(credentials.has(device.id)).toBe(false)
+  })
+
+  it('saves and reuses an encrypted key passphrase', async () => {
+    const keys = generateKeys({ passphrase: 'phrase', cipher: 'aes256-ctr', rounds: 16 })
+    server = await startTestServer({ username: 'alice', publicKey: keys.public })
+    const keyPath = join(dir, 'id_enc')
+    writeFileSync(keyPath, keys.private)
+    const device = addDevice(server.port, { type: 'key', keyPath })
+    await manager.connect({ deviceId: device.id, secret: 'phrase', remember: true, cols: 80, rows: 24 })
+    manager.close(device.id)
+    await waitFor(() => statusList(device.id).at(-1) === 'closed')
+    expect(await manager.connect({ deviceId: device.id, cols: 80, rows: 24 })).toEqual({ ok: true })
+  })
+})
+
+describe('SessionManager auto-reconnect', () => {
+  let reconnect = true
+  beforeEach(() => {
+    reconnect = true
+    manager = new SessionManager({
+      devices,
+      knownHosts,
+      confirmHostKey,
+      autoReconnect: () => reconnect,
+      reconnectDelaysMs: [50, 50, 50],
+      onStatus: (e) => statuses.push(e),
+      onData: (e) => (output += Buffer.from(e.data).toString())
+    })
+  })
+
+  it('reconnects with the same password after the connection drops', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    await manager.connect({ deviceId: device.id, secret: 'pw', cols: 80, rows: 24 })
+    server.dropAll()
+    await waitFor(() => statusList(device.id).filter((s) => s === 'connected').length === 2)
+    expect(statusList(device.id)).toEqual(['connecting', 'connected', 'reconnecting', 'connecting', 'connected'])
+    expect(statuses.at(-1)?.message).toBe('Reconnected after 1 attempt')
+    manager.write(device.id, 'back')
+    await waitFor(() => output.includes('echo:back'))
+  })
+
+  it('gives up after the last attempt and says why', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    await manager.connect({ deviceId: device.id, secret: 'pw', cols: 80, rows: 24 })
+    // Stop listening (retries are refused), then drop the open connection.
+    const closed = server.close()
+    server.dropAll()
+    await closed
+    server = null
+    await waitFor(() => statusList(device.id).at(-1) === 'error', 5000)
+    expect(statuses.at(-1)?.message).toMatch(/^Could not reconnect after 3 attempts: Connection refused/)
+    expect(statusList(device.id).filter((s) => s === 'reconnecting')).toHaveLength(3)
+  })
+
+  it('does not reconnect after a user disconnect, or when turned off', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    await manager.connect({ deviceId: device.id, secret: 'pw', cols: 80, rows: 24 })
+    manager.close(device.id)
+    await waitFor(() => statusList(device.id).at(-1) === 'closed')
+
+    reconnect = false
+    await manager.connect({ deviceId: device.id, secret: 'pw', cols: 80, rows: 24 })
+    server.dropAll()
+    await waitFor(() => statusList(device.id).at(-1) === 'closed')
+    await new Promise((r) => setTimeout(r, 200))
+    expect(statusList(device.id)).not.toContain('reconnecting')
+  })
+
+  it('cancels a pending reconnect on disconnect', async () => {
+    manager = new SessionManager({
+      devices,
+      knownHosts,
+      confirmHostKey,
+      autoReconnect: () => true,
+      reconnectDelaysMs: [300],
+      onStatus: (e) => statuses.push(e),
+      onData: () => {}
+    })
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const device = addDevice(server.port)
+    await manager.connect({ deviceId: device.id, secret: 'pw', cols: 80, rows: 24 })
+    server.dropAll()
+    await waitFor(() => statusList(device.id).at(-1) === 'reconnecting')
+    manager.close(device.id)
+    expect(statuses.at(-1)).toMatchObject({ status: 'closed', message: 'Reconnect cancelled' })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(statusList(device.id).at(-1)).toBe('closed')
+  })
+})
+
+describe('SessionManager snapshot', () => {
+  it('lists live sessions so a reloaded window can show them', async () => {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const a = addDevice(server.port)
+    const b = addDevice(server.port)
+    await manager.connect({ deviceId: a.id, secret: 'pw', cols: 80, rows: 24 })
+    expect(manager.snapshot()).toEqual([{ deviceId: a.id, status: 'connected' }])
+    expect(manager.snapshot().some((e) => e.deviceId === b.id)).toBe(false)
   })
 })

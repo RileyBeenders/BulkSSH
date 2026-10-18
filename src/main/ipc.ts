@@ -1,17 +1,25 @@
+import { writeFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import type { DeviceInput } from '@shared/device'
 import { MAX_COMMAND_LENGTH, type ConnectRequest } from '@shared/session'
+import type { CredentialStore } from './credentialStore'
 import type { DeviceStore } from './deviceStore'
 import type { SessionManager } from './sessionManager'
 import type { SettingsStore } from './settingsStore'
 
 // Every IPC message is validated here: the renderer is treated as untrusted input.
-export function registerIpc(
-  win: BrowserWindow,
-  devices: DeviceStore,
-  sessions: SessionManager,
+export interface IpcDeps {
+  win: BrowserWindow
+  devices: DeviceStore
+  sessions: SessionManager
   settings: SettingsStore
-): void {
+  credentials: CredentialStore
+}
+
+const MAX_EXPORT_CHARS = 50 * 1024 * 1024
+
+export function registerIpc({ win, devices, sessions, settings, credentials }: IpcDeps): void {
   const fromWindow = (e: IpcMainEvent | IpcMainInvokeEvent): boolean => e.sender === win.webContents
 
   const handle = <A extends unknown[], R>(channel: string, fn: (...args: A) => R): void => {
@@ -31,7 +39,32 @@ export function registerIpc(
   handle('devices:delete', (id: unknown) => {
     const deviceId = requireString(id, 'id')
     sessions.close(deviceId)
+    credentials.delete(deviceId)
     devices.delete(deviceId)
+  })
+
+  // The renderer only learns *whether* a secret is saved, never the secret.
+  handle('credentials:status', () => ({ available: credentials.available(), saved: credentials.savedIds() }))
+  handle('credentials:forget', (id: unknown) => credentials.delete(requireString(id, 'deviceId')))
+
+  // Export: the user picks the file in a native dialog; the renderer only
+  // supplies a suggested name and the text.
+  handle('files:saveText', async (name: unknown, text: unknown) => {
+    if (typeof name !== 'string' || typeof text !== 'string' || text.length > MAX_EXPORT_CHARS) {
+      throw new Error('Invalid export')
+    }
+    const safeName = basename(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'bulkssh-output.txt'
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export output',
+      defaultPath: safeName,
+      filters: [
+        { name: 'Text', extensions: ['txt', 'log'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(result.filePath, text, 'utf8')
+    return result.filePath
   })
   handle('devices:pickKeyFile', async () => {
     const result = await dialog.showOpenDialog(win, {
@@ -43,6 +76,7 @@ export function registerIpc(
 
   handle('session:connect', (req: unknown) => sessions.connect(parseConnect(req)))
   handle('session:close', (id: unknown) => sessions.close(requireString(id, 'deviceId')))
+  handle('session:list', () => sessions.snapshot())
   handle('session:exec', (id: unknown, command: unknown) => {
     if (typeof command !== 'string' || command.trim() === '' || command.length > MAX_COMMAND_LENGTH) {
       throw new Error('Invalid command')
@@ -69,9 +103,11 @@ function parseConnect(req: unknown): ConnectRequest {
   if (typeof req !== 'object' || req === null) throw new Error('Invalid connect request')
   const r = req as Record<string, unknown>
   if (r.secret !== undefined && typeof r.secret !== 'string') throw new Error('Invalid secret')
+  if (r.remember !== undefined && typeof r.remember !== 'boolean') throw new Error('Invalid remember flag')
   return {
     deviceId: requireString(r.deviceId, 'deviceId'),
     secret: r.secret as string | undefined,
+    remember: r.remember as boolean | undefined,
     cols: isDimension(r.cols) ? r.cols : 80,
     rows: isDimension(r.rows) ? r.rows : 24
   }

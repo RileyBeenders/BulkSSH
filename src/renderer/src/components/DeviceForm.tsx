@@ -5,11 +5,13 @@ import { Modal } from './Modal'
 
 interface Props {
   device: Device | null // null = new device
+  hasSavedSecret: boolean
+  onForgetSecret: (deviceId: string) => Promise<void>
   onSaved: (device: Device) => void
   onClose: () => void
 }
 
-export function DeviceForm({ device, onSaved, onClose }: Props): React.JSX.Element {
+export function DeviceForm({ device, hasSavedSecret, onForgetSecret, onSaved, onClose }: Props): React.JSX.Element {
   const [name, setName] = useState(device?.name ?? '')
   const [host, setHost] = useState(device?.host ?? '')
   const [port, setPort] = useState(String(device?.port ?? DEFAULT_SSH_PORT))
@@ -72,7 +74,7 @@ export function DeviceForm({ device, onSaved, onClose }: Props): React.JSX.Eleme
           <legend>Authentication</legend>
           <label className="inline">
             <input type="radio" checked={authType === 'password'} onChange={() => setAuthType('password')} />
-            Password (asked when connecting, never saved)
+            Password (asked when connecting; saved only if you tick “Remember”)
           </label>
           <label className="inline">
             <input type="radio" checked={authType === 'key'} onChange={() => setAuthType('key')} />
@@ -93,6 +95,14 @@ export function DeviceForm({ device, onSaved, onClose }: Props): React.JSX.Eleme
             </div>
           )}
         </fieldset>
+        {device && hasSavedSecret && (
+          <div className="row saved-row">
+            <span className="muted grow">🔑 A {device.auth.type === 'key' ? 'key passphrase' : 'password'} is saved for this device.</span>
+            <button type="button" onClick={() => void onForgetSecret(device.id)}>
+              Forget it
+            </button>
+          </div>
+        )}
         {errors.length > 0 && (
           <ul className="errors">
             {errors.map((err) => (

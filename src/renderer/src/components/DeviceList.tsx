@@ -7,6 +7,7 @@ interface Props {
   openIds: ReadonlySet<string>
   checked: ReadonlySet<string>
   onToggleChecked: (device: Device) => void
+  savedSecrets: ReadonlySet<string>
   statusOf: (id: string) => SessionStatus | undefined
   onSelect: (device: Device) => void
   onConnect: (device: Device) => void
@@ -23,7 +24,7 @@ export function DeviceList(props: Props): React.JSX.Element {
     <ul className="device-list">
       {devices.map((d, i) => {
         const status = statusOf(d.id)
-        const live = status === 'connecting' || status === 'connected'
+        const live = status === 'connecting' || status === 'connected' || status === 'reconnecting'
         const classes = [d.id === activeId && 'selected', openIds.has(d.id) && 'open'].filter(Boolean).join(' ')
         return (
           <li key={d.id} className={classes || undefined} onClick={() => props.onSelect(d)}>
@@ -39,7 +40,15 @@ export function DeviceList(props: Props): React.JSX.Element {
             <span className="num">{i + 1}</span>
             <span className={`dot ${status ?? 'idle'}`} title={status ?? 'not connected'} />
             <span className="label">
-              <span className="name">{d.name}</span>
+              <span className="name">
+                {d.name}
+                {props.savedSecrets.has(d.id) && (
+                  <span className="saved-secret" title="Password or passphrase saved (encrypted by Windows)">
+                    {' '}
+                    🔑
+                  </span>
+                )}
+              </span>
               <span className="addr">
                 {d.username}@{d.host}
                 {d.port !== 22 && `:${d.port}`}

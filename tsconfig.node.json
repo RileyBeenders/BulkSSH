@@ -17,6 +17,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "src/renderer/src/broadcast.ts"
   ]
 }

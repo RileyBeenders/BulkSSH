@@ -1,24 +1,13 @@
 import type { ExecResult } from '@shared/session'
-
-export interface BroadcastRow {
-  deviceId: string
-  number: number
-  name: string
-  result?: ExecResult
-}
-
-export interface BroadcastRun {
-  id: number
-  command: string
-  rows: BroadcastRow[]
-}
+import { describe, formatMs, succeeded, type BroadcastRun } from '../broadcast'
 
 interface Props {
   run: BroadcastRun
   onClose: () => void
+  onExport: () => void
 }
 
-export function BroadcastResults({ run, onClose }: Props): React.JSX.Element {
+export function BroadcastResults({ run, onClose, onExport }: Props): React.JSX.Element {
   const done = run.rows.filter((r) => r.result).length
   const failed = run.rows.filter((r) => r.result && !succeeded(r.result)).length
 
@@ -31,6 +20,9 @@ export function BroadcastResults({ run, onClose }: Props): React.JSX.Element {
           {failed > 0 && <span className="failed"> · {failed} failed</span>}
         </span>
         <span className="grow" />
+        <button onClick={onExport} disabled={done < run.rows.length} title="Export results to a text file">
+          Export
+        </button>
         <button onClick={onClose} aria-label="Close results" title="Close results">
           ✕
         </button>
@@ -62,28 +54,13 @@ export function BroadcastResults({ run, onClose }: Props): React.JSX.Element {
   )
 }
 
-function succeeded(r: ExecResult): boolean {
-  return r.ok && r.code === 0
-}
-
 function rowClass(r: ExecResult | undefined): string {
   if (!r) return 'pending'
   return succeeded(r) ? 'success' : 'failure'
-}
-
-function describe(r: ExecResult | undefined): string {
-  if (!r) return 'running…'
-  if (!r.ok) return 'error'
-  if (r.code === null) return `killed${r.signal ? ` (${r.signal})` : ''}`
-  return `exit ${r.code}`
 }
 
 function preview(r: ExecResult | undefined): string {
   if (!r) return ''
   const text = r.ok ? r.output : r.message
   return text.trim().split('\n')[0] ?? ''
-}
-
-function formatMs(ms: number): string {
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
 }

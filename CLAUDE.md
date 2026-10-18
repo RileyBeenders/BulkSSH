@@ -4,7 +4,7 @@ A program for connecting to multiple SSH clients at once (see [README.md](README
 
 ## Project status
 
-Phases 0–4 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring to checked devices, command broadcast with per-device exit codes, and a full-size focus view with copy/paste. Next is Phase 5 (safety and polish). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0–5 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring, command broadcast with per-device exit codes, a full-size focus view with copy/paste, confirmation of risky commands, opt-in saved passwords (OS-encrypted), auto-reconnect, command history, export, and recovery from renderer crashes. Next is Phase 6 (packaging). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
@@ -23,24 +23,25 @@ v1 is SSH only, but all connections go through a transport interface so telnet, 
 - `npm test`: run Vitest once (`npm run test:watch` to watch)
 - `npm run build`: typecheck and build to `out/`
 - `npm run dist`: build a Windows installer and portable exe into `dist/`
-- `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225). Any username, password `dev`. It runs a fake shell, never a real one; the same commands work over exec for broadcasts with real exit codes (`hostname`, `size`, `sleep <s>`, `fail [code]`, `fail-on <device number>`, …). `tui` is a full-screen test program (alternate screen, resize redraw, colours, arrow keys, cursor-position query) standing in for vim/top. Its host key lives in `.dev-ssh/` (gitignored).
+- `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225, `-- --password <pw>` to change the password). Any username, password `dev` by default. It runs a fake shell, never a real one; the same commands work over exec for broadcasts with real exit codes (`hostname`, `size`, `sleep <s>`, `fail [code]`, `fail-on <device number>`, …). `tui` is a full-screen test program (alternate screen, resize redraw, colours, arrow keys, cursor-position query) standing in for vim/top; `drop` cuts the connection to exercise auto-reconnect. Its host key lives in `.dev-ssh/` (gitignored).
 
 The Electron binary downloads itself on first run if missing (`node node_modules/electron/install.js` forces it).
 
 ## Layout
 
 - `src/main/`: Electron main process
-  - `index.ts`: window, host-key confirmation dialogs, permission handler (only clipboard read/write allowed), wiring
+  - `index.ts`: window, host-key confirmation dialogs, permission handler (only clipboard read/write allowed), renderer-crash reload, `safeStorage` cipher, wiring
   - `ipc.ts`: all IPC handlers; validates every argument and rejects other senders
-  - `sessionManager.ts`: one session per device (keyed by deviceId), credentials, host-key checks, `writeMany` (mirroring) and `exec` (broadcast; never throws, returns `{ ok: false }` instead)
+  - `sessionManager.ts`: one session per device (keyed by deviceId), credentials (explicit, saved, or none), host-key checks, auto-reconnect, `writeMany` (mirroring), `exec` (broadcast; never throws, returns `{ ok: false }` instead) and `snapshot` (live sessions, for a reloaded window)
   - `transport/`: `Transport` interface + `SshTransport`; new protocols go here. `exec` is optional on the interface (serial won't have it)
-  - `deviceStore.ts`, `knownHosts.ts`, `settingsStore.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`, `settings.json`)
+  - `deviceStore.ts`, `knownHosts.ts`, `settingsStore.ts`, `credentialStore.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`, `settings.json`, `credentials.json`)
 - `src/preload/`: the only renderer bridge, exposed as `window.bulkssh`; types in `index.d.ts`
 - `src/renderer/src/`: React UI
   - `App.tsx`: state for devices, open tiles, paging, the active tile, focus view, the password-prompt queue, the checked ("send to") set, mirror mode and the current broadcast; installs the mirror input handler; all app shortcuts go through `handleShortcut`
   - `terminals.ts`: one xterm instance per device, kept outside React; tiles attach/detach its DOM node, so page switches keep scrollback and don't resize terminals. Typed input goes through a replaceable handler (`setInputHandler`). App shortcuts and clipboard keys (from `@shared/keys`) are kept from reaching the device; right-click copies the selection or pastes
-  - `components/`: `DeviceList`, `Tile`, `Pager`, `BroadcastBar`, `BroadcastResults`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
-- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`, `mirror.ts`, `keys.ts`)
+  - `components/`: `DeviceList`, `Tile`, `Pager`, `BroadcastBar` (with in-memory history), `BroadcastResults`, `ConfirmDanger`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
+  - `broadcast.ts`: broadcast run types and the plain-text export format (no JSX, so tests can import it)
+- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`, `mirror.ts`, `keys.ts`, `danger.ts`)
 - `tests/`: Vitest tests. `tests/helpers/sshServer.ts` is an in-process ssh2 server used by `sessionManager.test.ts`
 - `scripts/dev-ssh-server.mjs`: the `npm run dev:ssh` server
 
@@ -63,9 +64,17 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 - Shortcuts, all defined in `src/shared/keys.ts` and unit-tested: Ctrl+PageUp/PageDown (page, or previous/next device in focus view), Ctrl+Shift+M (mirror), Ctrl+Shift+F (focus view). Clipboard: Ctrl+Shift+C / Ctrl+Insert copy, Ctrl+Shift+V / Shift+Insert paste, Ctrl+C copies only when text is selected (otherwise it is ^C), right-click copies or pastes. Plain Ctrl+V is left to the device. Don't claim new keys that full-screen programs (vim, less, top, readline) need.
 - Pastes go through `term.paste()`, so they are bracketed-paste aware and mirrored like typing.
 
+## Safety
+
+- `src/shared/danger.ts` lists risky commands (rm -r, reboot/shutdown, mkfs, dd, recursive chmod, firewall flushes, interface down, user/password changes, package removal, and network-gear reload/erase). Unix rules match only in command position (line start, after `;` `&` `|` `(` `$(` or `sudo`/`doas`) and are case-sensitive; network-gear rules are case-insensitive. Add a test in `tests/danger.test.ts` for every rule change, including a false-positive case.
+- A broadcast whose command matches needs confirmation in `ConfirmDanger` (Cancel is focused). While mirroring, a per-device `LineTracker` rebuilds the typed line from keystrokes; an Enter that would submit a risky line to several devices is held until confirmed. Lines recalled from history or edited with arrows/tab are marked uncertain; risky text that never appears in the tracked line (e.g. recalled with Up) can't be caught.
+- Auto-reconnect (setting, default on): 5 tries at 2/5/10/20/30 s. It reuses the last good password from memory (never disk), stops on wrong password or rejected host key, and is cancelled by Disconnect. Status `reconnecting` counts as live in the UI.
+- If the renderer crashes, the main process reloads it and the page re-adopts live sessions via `session:list`; scrollback from before the crash is lost.
+
 ## Secrets and host keys
 
-- Passwords and key passphrases are asked for at connect time and passed straight through; they are never written to disk or kept in renderer state. `devices.json` holds only host, port, username and key *path*.
+- Passwords and key passphrases are asked for at connect time. They are written to disk only if the user ticks "Remember", and then only as `safeStorage` ciphertext in `credentials.json` (DPAPI-protected key on Windows). The renderer never receives a saved secret, only which devices have one (`credentials:status`). A saved secret the device rejects is deleted. `devices.json` holds only host, port, username and key *path*.
+- Broadcast command history is kept in memory only, since commands can contain secrets.
 - Host keys are trust-on-first-use: unknown keys and changed keys both show a native dialog in the main process (the renderer cannot answer it). Never add a path that accepts keys silently.
 
 ## Gotchas

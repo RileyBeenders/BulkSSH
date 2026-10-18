@@ -9,6 +9,8 @@ export interface TestServer {
   port: number
   ptys: PseudoTtyInfo[]
   resizes: WindowChangeInfo[]
+  // Ends every client connection, like a network drop or device reboot.
+  dropAll: () => void
   close: () => Promise<void>
 }
 
@@ -34,7 +36,10 @@ export async function startTestServer(opts: TestServerOptions): Promise<TestServ
   const ptys: PseudoTtyInfo[] = []
   const resizes: WindowChangeInfo[] = []
 
+  const clients = new Set<{ end: () => void }>()
   const server = new Server({ hostKeys: [hostKey] }, (client) => {
+    clients.add(client)
+    client.on('close', () => clients.delete(client))
     client.on('error', () => {})
     client.on('authentication', (ctx) => {
       if (ctx.username !== opts.username) return ctx.reject()
@@ -93,6 +98,9 @@ export async function startTestServer(opts: TestServerOptions): Promise<TestServ
     port,
     ptys,
     resizes,
+    dropAll: () => {
+      for (const c of clients) c.end()
+    },
     close: () => new Promise((resolve) => server.close(() => resolve()))
   }
 }

@@ -100,7 +100,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Full-size single-device terminal (resize, copy/paste, colors); switch between grid and focus without dropping connections
 - Done when: vim/top work in a focus session
 
-**Phase 5: Safety and polish**
+**Phase 5: Safety and polish** (done 2026-10-17; host keys were already done in Phase 1. Saved secrets use Electron safeStorage, opt-in per device. Also added: recovery from renderer crashes. Export to file is unit-tested but the native save dialog was not driven end to end)
 - Host key verification (prompt on first connect, warning on change)
 - Credentials in the OS credential store (or key files only)
 - Confirmation before mirrored or broadcast input matching a "dangerous" pattern (`rm -rf`, `reboot`, `shutdown`, ...), and a clear target count

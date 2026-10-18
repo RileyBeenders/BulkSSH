@@ -12,11 +12,12 @@ interface Props {
 export function SettingsDialog({ settings, onSaved, onClose }: Props): React.JSX.Element {
   const [pageSize, setPageSize] = useState(String(settings.pageSize))
   const [timeout, setTimeoutSec] = useState(String(settings.broadcastTimeoutSec))
+  const [autoReconnect, setAutoReconnect] = useState(settings.autoReconnect)
   const [errors, setErrors] = useState<string[]>([])
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
-    const next: Settings = { pageSize: Number(pageSize), broadcastTimeoutSec: Number(timeout) }
+    const next: Settings = { pageSize: Number(pageSize), broadcastTimeoutSec: Number(timeout), autoReconnect }
     const problems = validateSettings(next)
     if (problems.length > 0) return setErrors(problems)
     try {
@@ -37,6 +38,10 @@ export function SettingsDialog({ settings, onSaved, onClose }: Props): React.JSX
         <label>
           Broadcast timeout per device, seconds (1–{MAX_BROADCAST_TIMEOUT_SEC})
           <input value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} inputMode="numeric" />
+        </label>
+        <label className="inline">
+          <input type="checkbox" checked={autoReconnect} onChange={(e) => setAutoReconnect(e.target.checked)} />
+          Reconnect automatically when a connection drops (up to 5 tries)
         </label>
         {errors.length > 0 && (
           <ul className="errors">

@@ -1,12 +1,13 @@
 // Session state shared between main and renderer.
 // There is at most one session per device, so sessions are keyed by deviceId.
 
-export type SessionStatus = 'connecting' | 'connected' | 'closed' | 'error'
+// 'reconnecting': the connection dropped and a retry is scheduled.
+export type SessionStatus = 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'error'
 
 export interface SessionStatusEvent {
   deviceId: string
   status: SessionStatus
-  // Human-readable reason for 'error' (and sometimes 'closed').
+  // Human-readable reason for 'error', 'reconnecting' and sometimes 'closed'.
   message?: string
 }
 
@@ -17,8 +18,12 @@ export interface SessionDataEvent {
 
 export interface ConnectRequest {
   deviceId: string
-  // Password, or key passphrase for key auth. Used once, never stored.
+  // Password, or key passphrase for key auth. When omitted, a saved secret
+  // is used if there is one.
   secret?: string
+  // Save `secret` (encrypted by the OS) after a successful login; false
+  // forgets any saved one.
+  remember?: boolean
   cols: number
   rows: number
 }

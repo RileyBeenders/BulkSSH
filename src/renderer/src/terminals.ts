@@ -72,6 +72,23 @@ export function attachTerminal(deviceId: string, container: HTMLElement): () => 
   }
 }
 
+// The device's scrollback as plain text, for export.
+export function bufferText(deviceId: string): string {
+  const term = entries.get(deviceId)?.term
+  if (!term) return ''
+  const buffer = term.buffer.normal
+  const lines: string[] = []
+  for (let i = 0; i < buffer.length; i++) {
+    const line = buffer.getLine(i)
+    if (!line) continue
+    // Wrapped rows continue the previous line instead of starting a new one.
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += line.translateToString(true)
+    else lines.push(line.translateToString(true))
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines.join('\n') + '\n'
+}
+
 export function disposeTerminal(deviceId: string): void {
   entries.get(deviceId)?.term.dispose()
   entries.delete(deviceId)

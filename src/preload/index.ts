@@ -26,6 +26,17 @@ const api = {
     save: (settings: Settings): Promise<Settings> => ipcRenderer.invoke('settings:save', settings)
   },
 
+  credentials: {
+    status: (): Promise<{ available: boolean; saved: string[] }> => ipcRenderer.invoke('credentials:status'),
+    forget: (deviceId: string): Promise<void> => ipcRenderer.invoke('credentials:forget', deviceId)
+  },
+
+  files: {
+    // Asks where to save (native dialog); resolves to the path, or null if cancelled.
+    saveText: (suggestedName: string, text: string): Promise<string | null> =>
+      ipcRenderer.invoke('files:saveText', suggestedName, text)
+  },
+
   devices: {
     list: (): Promise<Device[]> => ipcRenderer.invoke('devices:list'),
     save: (input: DeviceInput): Promise<Device> => ipcRenderer.invoke('devices:save', input),
@@ -36,6 +47,8 @@ const api = {
   session: {
     connect: (req: ConnectRequest): Promise<ConnectResult> => ipcRenderer.invoke('session:connect', req),
     close: (deviceId: string): Promise<void> => ipcRenderer.invoke('session:close', deviceId),
+    // Sessions that are already live, e.g. after the window was reloaded.
+    list: (): Promise<SessionStatusEvent[]> => ipcRenderer.invoke('session:list'),
     write: (deviceId: string, data: string): void => ipcRenderer.send('session:write', deviceId, data),
     writeMany: (deviceIds: string[], data: string): void => ipcRenderer.send('session:writeMany', deviceIds, data),
     exec: (deviceId: string, command: string): Promise<ExecResult> =>

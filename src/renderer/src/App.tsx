@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { dangerReasons, LineTracker } from '@shared/danger'
 import type { Device } from '@shared/device'
 import { isTerminalReport, mirrorTargets } from '@shared/mirror'
 import { clampPage, gridShape, pageCount, pageOf, pageSlice } from '@shared/paging'
@@ -6,14 +7,24 @@ import type { ExecResult, SessionStatusEvent } from '@shared/session'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import { bridge } from './bridge'
 import { BroadcastBar } from './components/BroadcastBar'
-import { BroadcastResults, type BroadcastRun } from './components/BroadcastResults'
+import { formatResults, type BroadcastRun } from './broadcast'
+import { BroadcastResults } from './components/BroadcastResults'
+import { ConfirmDanger, type DangerConfirmation } from './components/ConfirmDanger'
 import { DeviceForm } from './components/DeviceForm'
 import { DeviceList } from './components/DeviceList'
 import { Pager } from './components/Pager'
 import { SecretPrompt } from './components/SecretPrompt'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Tile } from './components/Tile'
-import { disposeTerminal, focusTerminal, getTerminal, hasTerminal, isAppShortcut, setInputHandler } from './terminals'
+import {
+  bufferText,
+  disposeTerminal,
+  focusTerminal,
+  getTerminal,
+  hasTerminal,
+  isAppShortcut,
+  setInputHandler
+} from './terminals'
 
 type Editing = { device: Device | null } | null
 interface PromptEntry {
@@ -46,6 +57,13 @@ export function App(): React.JSX.Element {
   const mirrorBeforeFocus = useRef(false)
   const [broadcast, setBroadcast] = useState<BroadcastRun | null>(null)
   const broadcastId = useRef(0)
+  // A risky command waiting for confirmation, and what to do if confirmed.
+  const [confirmation, setConfirmation] = useState<(DangerConfirmation & { run: () => void }) | null>(null)
+  // Saved-password state; the secrets themselves stay in the main process.
+  const [savedSecrets, setSavedSecrets] = useState<ReadonlySet<string>>(new Set())
+  const [canRemember, setCanRemember] = useState(false)
+  // One command-line tracker per device, to check lines typed while mirroring.
+  const trackers = useRef(new Map<string, LineTracker>())
 
   const devicesRef = useRef(devices)
   devicesRef.current = devices
@@ -55,6 +73,14 @@ export function App(): React.JSX.Element {
     void bridge.getVersion().then(setVersion)
     void bridge.settings.get().then(setSettings)
     void bridge.devices.list().then(setDevices)
+    void refreshCredentials()
+    // After a reload (e.g. the page crashed) sessions may still be live in the
+    // main process: show them again.
+    void bridge.session.list().then((live) => {
+      if (live.length === 0) return
+      setStatuses((s) => ({ ...s, ...Object.fromEntries(live.map((e) => [e.deviceId, e])) }))
+      setOpenIds((ids) => [...new Set([...ids, ...live.map((e) => e.deviceId)])])
+    })
     return bridge.session.onStatus((event) => {
       setStatuses((s) => ({ ...s, [event.deviceId]: event }))
       writeStatusLine(devicesRef.current.find((d) => d.id === event.deviceId), event)
@@ -71,9 +97,12 @@ export function App(): React.JSX.Element {
   const shape = gridShape(Math.min(pageSize, openDevices.length))
   const numberOf = (id: string): number => devices.findIndex((d) => d.id === id) + 1
   const statusOf = (id: string) => statuses[id]?.status
-  const isLive = (id: string): boolean => statusOf(id) === 'connecting' || statusOf(id) === 'connected'
+  const isLive = (id: string): boolean => {
+    const s = statusOf(id)
+    return s === 'connecting' || s === 'connected' || s === 'reconnecting'
+  }
   const isConnected = (id: string): boolean => statusOf(id) === 'connected'
-  const modalOpen = editing !== null || showSettings || prompts.length > 0
+  const modalOpen = editing !== null || showSettings || prompts.length > 0 || confirmation !== null
 
   useEffect(() => {
     if (!revealId) return
@@ -148,11 +177,42 @@ export function App(): React.JSX.Element {
     setInputHandler((deviceId, data) => {
       if (!bridge) return
       const m = mirrorState.current
-      const targets = m.mirrorOn && !isTerminalReport(data) ? mirrorTargets(deviceId, m.checked, m.isConnected) : []
-      if (targets.length > 0) bridge.session.writeMany([deviceId, ...targets], data)
-      else bridge.session.write(deviceId, data)
+      if (isTerminalReport(data)) return bridge.session.write(deviceId, data)
+
+      let tracker = trackers.current.get(deviceId)
+      if (!tracker) trackers.current.set(deviceId, (tracker = new LineTracker()))
+      const targets = m.mirrorOn ? mirrorTargets(deviceId, m.checked, m.isConnected) : []
+      const send = (): void => {
+        tracker.commit(data)
+        if (targets.length > 0) bridge?.session.writeMany([deviceId, ...targets], data)
+        else bridge?.session.write(deviceId, data)
+      }
+      if (targets.length === 0) return send()
+
+      // Mirrored: hold an Enter that would run a risky line on several devices.
+      const risky = tracker.preview(data).map((l) => ({ ...l, reasons: dangerReasons(l.line) })).filter((l) => l.reasons.length > 0)
+      if (risky.length === 0) return send()
+      const all = devicesRef.current
+      setConfirmation({
+        kind: 'mirror',
+        command: risky.map((l) => l.line).join('\n'),
+        reasons: [...new Set(risky.flatMap((l) => l.reasons))],
+        uncertain: risky.some((l) => !l.known),
+        targets: [deviceId, ...targets].map((id) => ({
+          number: all.findIndex((d) => d.id === id) + 1,
+          name: all.find((d) => d.id === id)?.name ?? id
+        })),
+        run: send
+      })
     })
   }, [])
+
+  const refreshCredentials = async (): Promise<void> => {
+    if (!bridge) return
+    const status = await bridge.credentials.status()
+    setCanRemember(status.available)
+    setSavedSecrets(new Set(status.saved))
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -171,7 +231,7 @@ export function App(): React.JSX.Element {
   }, [])
 
   const connect = useCallback(
-    async (device: Device, secret?: string, reveal = true) => {
+    async (device: Device, secret?: string, reveal = true, remember?: boolean) => {
       if (!bridge) return
       setOpenIds((ids) => (ids.includes(device.id) ? ids : [...ids, device.id]))
       if (reveal) {
@@ -179,7 +239,8 @@ export function App(): React.JSX.Element {
         setRevealId(device.id)
       }
       const term = getTerminal(device.id)
-      const result = await bridge.session.connect({ deviceId: device.id, secret, cols: term.cols, rows: term.rows })
+      const result = await bridge.session.connect({ deviceId: device.id, secret, remember, cols: term.cols, rows: term.rows })
+      if (remember !== undefined || !result.ok) void refreshCredentials()
       if (result.ok) {
         // The tile was usually fitted while connecting; send the final size.
         bridge.session.resize(device.id, term.cols, term.rows)
@@ -190,8 +251,11 @@ export function App(): React.JSX.Element {
     [enqueuePrompt]
   )
 
+  // Password devices are prompted for, unless a password is saved.
+  const needsPrompt = (device: Device): boolean => device.auth.type === 'password' && !savedSecrets.has(device.id)
+
   const onConnect = (device: Device): void => {
-    if (device.auth.type === 'password') enqueuePrompt(device)
+    if (needsPrompt(device)) enqueuePrompt(device)
     else void connect(device)
   }
 
@@ -200,7 +264,7 @@ export function App(): React.JSX.Element {
     if (targets.length === 0) return
     setActiveId(targets[0].id)
     for (const d of targets) {
-      if (d.auth.type === 'password') enqueuePrompt(d)
+      if (needsPrompt(d)) enqueuePrompt(d)
       else void connect(d, undefined, false)
     }
     setRevealId(targets[0].id)
@@ -245,6 +309,18 @@ export function App(): React.JSX.Element {
   // Runs the command on every target in parallel; each row fills in as its
   // device answers, so one slow or failing device never holds up the rest.
   const runBroadcast = (command: string): void => {
+    const reasons = dangerReasons(command)
+    if (reasons.length === 0) return startBroadcast(command)
+    setConfirmation({
+      kind: 'broadcast',
+      command,
+      reasons,
+      targets: broadcastTargets.map((d) => ({ number: numberOf(d.id), name: d.name })),
+      run: () => startBroadcast(command)
+    })
+  }
+
+  const startBroadcast = (command: string): void => {
     if (!bridge) return
     const id = ++broadcastId.current
     setBroadcast({
@@ -278,6 +354,8 @@ export function App(): React.JSX.Element {
     setPrompts((q) => q.filter((p) => p.device.id !== device.id))
     setChecked((set) => new Set([...set].filter((id) => id !== device.id)))
     setDevices((ds) => ds.filter((d) => d.id !== device.id))
+    trackers.current.delete(device.id)
+    void refreshCredentials()
   }
 
   const onSaved = (saved: Device): void => {
@@ -294,14 +372,23 @@ export function App(): React.JSX.Element {
     ? prompts.slice(1).filter((p) => p.device.auth.type === 'password')
     : []
 
-  const submitPrompt = (secret: string, useForOthers: boolean): void => {
+  const submitPrompt = (secret: string, useForOthers: boolean, remember: boolean): void => {
     const reuse = useForOthers ? otherPasswordPrompts : []
     setPrompts((q) => q.filter((p) => p !== prompt && !reuse.includes(p)))
-    void connect(prompt.device, secret)
-    for (const p of reuse) void connect(p.device, secret, false)
+    void connect(prompt.device, secret, true, remember)
+    for (const p of reuse) void connect(p.device, secret, false, remember)
   }
 
   const liveCount = devices.filter((d) => isLive(d.id)).length
+
+  const exportTerminal = async (d: Device): Promise<void> => {
+    if (!bridge || !hasTerminal(d.id)) return
+    await bridge.files.saveText(`${fileSafe(d.name)}-${timestamp()}.txt`, bufferText(d.id))
+  }
+
+  const exportBroadcast = async (run: BroadcastRun): Promise<void> => {
+    await bridge?.files.saveText(`broadcast-${timestamp()}.txt`, formatResults(run))
+  }
 
   const renderTile = (d: Device, focused: boolean): React.JSX.Element => (
     <Tile
@@ -317,6 +404,7 @@ export function App(): React.JSX.Element {
       onConnect={() => onConnect(d)}
       onDisconnect={() => void bridge?.session.close(d.id)}
       onClose={() => closeTile(d)}
+      onExport={() => void exportTerminal(d)}
     />
   )
 
@@ -355,6 +443,7 @@ export function App(): React.JSX.Element {
           openIds={openSet}
           checked={checked}
           onToggleChecked={toggleChecked}
+          savedSecrets={savedSecrets}
           statusOf={statusOf}
           onSelect={onSelect}
           onConnect={onConnect}
@@ -414,7 +503,9 @@ export function App(): React.JSX.Element {
             )}
           </>
         )}
-        {broadcast && <BroadcastResults run={broadcast} onClose={() => setBroadcast(null)} />}
+        {broadcast && (
+          <BroadcastResults run={broadcast} onClose={() => setBroadcast(null)} onExport={() => void exportBroadcast(broadcast)} />
+        )}
         <BroadcastBar
           mirrorOn={mirrorOn}
           onToggleMirror={() => setMirrorOn((on) => !on)}
@@ -426,7 +517,28 @@ export function App(): React.JSX.Element {
         />
       </main>
 
-      {editing && <DeviceForm device={editing.device} onSaved={onSaved} onClose={() => setEditing(null)} />}
+      {editing && (
+        <DeviceForm
+          device={editing.device}
+          hasSavedSecret={!!editing.device && savedSecrets.has(editing.device.id)}
+          onForgetSecret={async (id) => {
+            await bridge?.credentials.forget(id)
+            await refreshCredentials()
+          }}
+          onSaved={onSaved}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {confirmation && (
+        <ConfirmDanger
+          confirmation={confirmation}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => {
+            setConfirmation(null)
+            confirmation.run()
+          }}
+        />
+      )}
       {showSettings && (
         <SettingsDialog
           settings={settings}
@@ -446,6 +558,7 @@ export function App(): React.JSX.Element {
           othersWaiting={otherPasswordPrompts.length}
           onClose={() => setPrompts((q) => q.filter((p) => p !== prompt))}
           onSubmit={submitPrompt}
+          canRemember={canRemember}
         />
       )}
     </div>
@@ -466,8 +579,19 @@ function writeStatusLine(device: Device | undefined, event: SessionStatusEvent):
     case 'error':
       term.write(`\x1b[31m${event.message ?? 'Connection failed'}\x1b[0m\r\n`)
       break
+    case 'reconnecting':
+      term.write(`\r\n\x1b[33m${event.message ?? 'Reconnecting…'}\x1b[0m\r\n`)
+      break
     case 'closed':
       term.write(`\r\n\x1b[90m[Disconnected${event.message ? `: ${event.message}` : ''}]\x1b[0m\r\n`)
       break
   }
+}
+
+function timestamp(): string {
+  return new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+}
+
+function fileSafe(name: string): string {
+  return name.replace(/[^\w.-]+/g, '_') || 'device'
 }

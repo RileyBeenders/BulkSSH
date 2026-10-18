@@ -5,6 +5,7 @@ import { TerminalView } from './TerminalView'
 const STATUS_TEXT: Record<SessionStatus, string> = {
   connecting: 'Connecting…',
   connected: 'Connected',
+  reconnecting: 'Reconnecting…',
   closed: 'Disconnected',
   error: 'Error'
 }
@@ -23,12 +24,13 @@ interface Props {
   onConnect: () => void
   onDisconnect: () => void
   onClose: () => void
+  onExport: () => void
 }
 
 // One device's live terminal in the grid.
 export function Tile(props: Props): React.JSX.Element {
   const { device, status } = props
-  const live = status === 'connecting' || status === 'connected'
+  const live = status === 'connecting' || status === 'connected' || status === 'reconnecting'
 
   return (
     <section
@@ -60,6 +62,9 @@ export function Tile(props: Props): React.JSX.Element {
             ▶
           </button>
         )}
+        <button onClick={props.onExport} title="Export scrollback to a text file" aria-label={`Export ${device.name}`}>
+          ⭳
+        </button>
         <button
           onClick={props.onToggleFocus}
           title={props.focused ? 'Back to the grid (Ctrl+Shift+F)' : 'Focus this device (Ctrl+Shift+F)'}

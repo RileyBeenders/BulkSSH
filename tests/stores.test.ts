@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DeviceStore } from '../src/main/deviceStore'
+import { CredentialStore, type Cipher } from '../src/main/credentialStore'
 import { KnownHosts } from '../src/main/knownHosts'
 import { SettingsStore } from '../src/main/settingsStore'
 
@@ -83,16 +84,59 @@ describe('KnownHosts', () => {
 describe('SettingsStore', () => {
   it('defaults to 6 per page, saves and reloads', () => {
     const path = join(dir, 'settings.json')
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 6, broadcastTimeoutSec: 30 })
-    new SettingsStore(path).save({ pageSize: 9, broadcastTimeoutSec: 10 })
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 9, broadcastTimeoutSec: 10 })
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 6, broadcastTimeoutSec: 30, autoReconnect: true })
+    new SettingsStore(path).save({ pageSize: 9, broadcastTimeoutSec: 10, autoReconnect: false })
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 9, broadcastTimeoutSec: 10, autoReconnect: false })
   })
 
   it('rejects invalid settings without changing the saved ones', () => {
     const path = join(dir, 'settings.json')
     const store = new SettingsStore(path)
-    store.save({ pageSize: 4, broadcastTimeoutSec: 30 })
-    expect(() => store.save({ pageSize: 100, broadcastTimeoutSec: 30 })).toThrow('Devices per page')
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 4, broadcastTimeoutSec: 30 })
+    store.save({ pageSize: 4, broadcastTimeoutSec: 30, autoReconnect: true })
+    expect(() => store.save({ pageSize: 100, broadcastTimeoutSec: 30, autoReconnect: true })).toThrow('Devices per page')
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 4, broadcastTimeoutSec: 30, autoReconnect: true })
+  })
+})
+
+// Stand-in for Electron safeStorage: reversible, but never the plain text.
+export const fakeCipher = (available = true): Cipher => ({
+  available: () => available,
+  encrypt: (plain) => Buffer.from([...Buffer.from(plain, 'utf8')].map((b) => b ^ 0x5a)),
+  decrypt: (enc) => {
+    if (enc[0] === 0xff) throw new Error('cannot decrypt')
+    return Buffer.from([...enc].map((b) => b ^ 0x5a)).toString('utf8')
+  }
+})
+
+describe('CredentialStore', () => {
+  it('saves only ciphertext and reads it back after a restart', () => {
+    const path = join(dir, 'credentials.json')
+    new CredentialStore(path, fakeCipher()).set('dev-1', 'hunter2')
+    expect(readFileSync(path, 'utf8')).not.toContain('hunter2')
+    const reloaded = new CredentialStore(path, fakeCipher())
+    expect(reloaded.get('dev-1')).toBe('hunter2')
+    expect(reloaded.savedIds()).toEqual(['dev-1'])
+  })
+
+  it('forgets secrets', () => {
+    const path = join(dir, 'credentials.json')
+    const store = new CredentialStore(path, fakeCipher())
+    store.set('dev-1', 'a')
+    store.delete('dev-1')
+    expect(new CredentialStore(path, fakeCipher()).has('dev-1')).toBe(false)
+  })
+
+  it('refuses to save when OS encryption is unavailable', () => {
+    const store = new CredentialStore(join(dir, 'credentials.json'), fakeCipher(false))
+    expect(() => store.set('dev-1', 'a')).toThrow('Secure storage is not available')
+    expect(existsSync(join(dir, 'credentials.json'))).toBe(false)
+  })
+
+  it('drops entries that can no longer be decrypted', () => {
+    const path = join(dir, 'credentials.json')
+    writeFileSync(path, JSON.stringify({ version: 1, secrets: { 'dev-1': Buffer.from([0xff, 1]).toString('base64') } }))
+    const store = new CredentialStore(path, fakeCipher())
+    expect(store.get('dev-1')).toBeUndefined()
+    expect(store.has('dev-1')).toBe(false)
   })
 })

@@ -7,20 +7,24 @@ interface Props {
   message?: string
   // Other devices waiting for a password; offers to reuse this one for them.
   othersWaiting: number
-  onSubmit: (secret: string, useForOthers: boolean) => void
+  // OS encryption is available, so the secret can be remembered.
+  canRemember: boolean
+  onSubmit: (secret: string, useForOthers: boolean, remember: boolean) => void
   onClose: () => void
 }
 
 // Asks for a password or key passphrase. The value goes straight to the
 // connect call and is not kept anywhere in the UI state afterwards.
-export function SecretPrompt({ device, message, othersWaiting, onSubmit, onClose }: Props): React.JSX.Element {
+export function SecretPrompt(props: Props): React.JSX.Element {
+  const { device, message, othersWaiting, canRemember, onSubmit, onClose } = props
   const [secret, setSecret] = useState('')
   const [useForOthers, setUseForOthers] = useState(false)
+  const [remember, setRemember] = useState(false)
   const isKey = device.auth.type === 'key'
 
   const submit = (e: FormEvent): void => {
     e.preventDefault()
-    onSubmit(secret, useForOthers)
+    onSubmit(secret, useForOthers, remember)
   }
 
   return (
@@ -47,6 +51,10 @@ export function SecretPrompt({ device, message, othersWaiting, onSubmit, onClose
             Also use for the other {othersWaiting} device{othersWaiting === 1 ? '' : 's'} waiting for a password
           </label>
         )}
+        <label className="inline" title={canRemember ? undefined : 'Secure storage is not available on this system'}>
+          <input type="checkbox" checked={remember} disabled={!canRemember} onChange={(e) => setRemember(e.target.checked)} />
+          Remember{useForOthers ? ' for each of these devices' : ''} (encrypted with your Windows account)
+        </label>
         <div className="actions">
           <button type="button" onClick={onClose}>
             {othersWaiting > 0 ? 'Skip' : 'Cancel'}
