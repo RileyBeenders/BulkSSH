@@ -1,7 +1,7 @@
 {
   "name": "bulkssh",
   "version": "0.1.0",
-  "description": "Desktop app for controlling many SSH sessions at once",
+  "description": "Connect to many SSH devices at once: a grid of live terminals, keystroke mirroring and command broadcast",
   "main": "./out/main/index.js",
   "author": "Riley B",
   "license": "UNLICENSED",
@@ -13,12 +13,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder --win",
-    "dev:ssh": "node scripts/dev-ssh-server.mjs"
+    "dist": "npm run build && electron-builder --win --publish never",
+    "dev:ssh": "node scripts/dev-ssh-server.mjs",
+    "icon": "node scripts/generate-icon.mjs"
   },
   "dependencies": {
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
@@ -32,8 +31,11 @@
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
-  }
+  },
+  "homepage": "https://github.com/RileyBeenders/BulkSSH"
 }

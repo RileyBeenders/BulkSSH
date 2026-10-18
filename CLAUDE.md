@@ -1,10 +1,10 @@
 # BulkSSH
 
-A program for connecting to multiple SSH clients at once (see [README.md](README.md)).
+A Windows desktop app for working with many SSH devices at once. [README.md](README.md) is the user guide; keep it in step with features and shortcuts.
 
 ## Project status
 
-Phases 0–5 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring, command broadcast with per-device exit codes, a full-size focus view with copy/paste, confirmation of risky commands, opt-in saved passwords (OS-encrypted), auto-reconnect, command history, export, and recovery from renderer crashes. Next is Phase 6 (packaging). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0–5 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring, command broadcast with per-device exit codes, a full-size focus view with copy/paste, confirmation of risky commands, opt-in saved passwords (OS-encrypted), auto-reconnect, command history, export, and recovery from renderer crashes. Phase 6 (packaging) is done too: Windows installer + portable exe. v1 is complete; what's next is in the plan's Future roadmap (telnet, serial, SFTP, …). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
@@ -22,7 +22,8 @@ v1 is SSH only, but all connections go through a transport interface so telnet, 
 - `npm run typecheck`: type-check main/preload and renderer separately
 - `npm test`: run Vitest once (`npm run test:watch` to watch)
 - `npm run build`: typecheck and build to `out/`
-- `npm run dist`: build a Windows installer and portable exe into `dist/`
+- `npm run dist`: build `dist/BulkSSH-Setup-<version>.exe` (per-user NSIS installer) and `dist/BulkSSH-<version>-portable.exe`
+- `npm run icon`: regenerate `build/icon.png` from `scripts/generate-icon.mjs` (no dependencies)
 - `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225, `-- --password <pw>` to change the password). Any username, password `dev` by default. It runs a fake shell, never a real one; the same commands work over exec for broadcasts with real exit codes (`hostname`, `size`, `sleep <s>`, `fail [code]`, `fail-on <device number>`, …). `tui` is a full-screen test program (alternate screen, resize redraw, colours, arrow keys, cursor-position query) standing in for vim/top; `drop` cuts the connection to exercise auto-reconnect. Its host key lives in `.dev-ssh/` (gitignored).
 
 The Electron binary downloads itself on first run if missing (`node node_modules/electron/install.js` forces it).
@@ -83,6 +84,13 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 - On Windows, stopping an `npm run dev:ssh` background task kills `npm` but can leave the `node` child listening on 2222+. A later server then fails with `EADDRINUSE` while the app silently talks to the old one. Check for and stop leftover `dev-ssh-server.mjs` processes before restarting it.
 - CDP mouse events: send `mouseReleased` with `buttons: 0`, or xterm treats the drag as still in progress and the selection runs to the end of the screen.
 - When driving the Electron window over CDP for checks, a window hidden behind others reports `visibilityState: hidden` and xterm stops repainting. Launch with `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows`, and use `--user-data-dir=<temp dir>` so test devices don't land in the real app data.
+
+## Packaging
+
+- `electron-builder.yml`: NSIS (per-user, no admin) + portable, icon `build/icon.png`, `npmRebuild: false` (ssh2's optional native addons are never built, so no C++ toolchain is needed). Uninstall keeps `%APPDATA%\bulkssh`.
+- Only `ssh2` is a runtime dependency; everything the renderer uses (React, xterm) is bundled by Vite and belongs in `devDependencies`, so it isn't copied into the package a second time. Anything the main process `require`s at runtime must be in `dependencies`.
+- Builds are not code-signed (SmartScreen warns). `.github/workflows/release.yml` builds both exes on manual dispatch or a `v*` tag and uploads them as a workflow artifact; it does not publish a release.
+- To check a packaged build, run `dist/win-unpacked/BulkSSH.exe` (same flags as the CDP gotcha below work). Don't run the installer on the dev machine unasked: it adds shortcuts and an uninstall entry.
 
 ## Electron security rules
 

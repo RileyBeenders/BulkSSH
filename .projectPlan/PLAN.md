@@ -107,7 +107,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Reconnect on drop, command history, export output to file
 - Done when: no secrets sit in plain text on disk
 
-**Phase 6: Packaging**
+**Phase 6: Packaging** (done 2026-10-17; installer + portable built with an app icon. The unpacked app and portable exe were tested automatically; install, use and uninstall were tested by hand. Unsigned for now. A GitHub Actions workflow builds both on demand)
 - Windows installer or portable build; README with usage
 
 ## Future roadmap (after v1)
