@@ -1,6 +1,6 @@
 {
   "name": "bulkssh",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Connect to many SSH devices at once: a grid of live terminals, keystroke mirroring and command broadcast",
   "main": "./out/main/index.js",
   "author": "Riley B",

@@ -23,16 +23,36 @@ Your devices, trusted host keys, settings and any saved passwords are kept in `%
 
 ### Add devices
 
-Click **+ Add** and fill in a name, host, port (22 by default) and username, then choose how to log in:
+Click **+ Add**, type one or more addresses in **Host(s)**, enter the username and choose how to log in.
+
+**Host(s)** takes one address or a whole list, separated by commas, spaces or new lines. Add `:port` when it isn't 22:
+
+```text
+192.168.1.10, 192.168.1.11:2222, switch.local, [fe80::1]:22
+```
+
+- Every device in the list gets the same **username** and **login method**, so this suits a rack of switches or a batch of Pis that share a login.
+- **Name** is optional. One device takes the name as typed. Several are numbered: `switch` becomes `switch-1`, `switch-2`, …. Leave it empty and each device is named after its address.
+- Before you save, the form previews every device it will create. Addresses already saved with the same username are reused instead of duplicated.
+- **Connect after adding** (on by default) connects them straight away. If they use a password, you're asked once, with **Also use for the other devices** already ticked.
+
+Login methods:
 
 - **Password**: asked for when you connect. It is only saved if you tick **Remember**.
 - **Private key file**: pick the key (for example `C:\Users\you\.ssh\id_ed25519`). If the key has a passphrase, you are asked for it when you connect.
 
-Devices are numbered in the order you add them. The numbers stay the same everywhere: the device list, the tiles and broadcast results.
+Devices are numbered in the order you add them. The numbers stay the same everywhere: the device list, the tiles and broadcast results. To change one device's address later, use **✎ Edit** (one address per saved device).
+
+### Remove devices
+
+- **One device:** **✕** on its row.
+- **Several at once:** click **Edit list** (next to **+ Add**), then tick the devices or click their rows. **All / None / Invert** help with long lists. Click **Delete N selected**, check the list in the confirmation, and confirm. Click **Done** when finished.
+- Deleting a connected device disconnects it first. Deleting a device also forgets its saved password.
+- While **Edit list** is on, the send-to checkboxes and row buttons are hidden, so a delete selection can't be confused with the devices that receive broadcasts.
 
 ### Connect
 
-- **▶** on a device row connects that device. **Connect all** connects every device. If several need a password, you're asked once, with an option to use the same password for all of them.
+- **▶** on a device row connects that device. **Connect all** connects every device. If several need a password, you're asked once, and the same password is offered for all of them.
 - The first time you connect to a device, BulkSSH shows its **host key fingerprint** and asks whether to trust it. If a known device later presents a *different* key, you get a warning and the connection only goes ahead if you explicitly replace the key.
 - If a connection drops (network glitch, device reboot), BulkSSH **reconnects automatically**: up to 5 tries over about a minute. **■ Disconnect** stops it. You can turn this off in Settings.
 

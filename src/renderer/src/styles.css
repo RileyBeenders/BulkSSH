@@ -625,6 +625,119 @@ button.danger-button {
   align-items: center;
 }
 
+/* Edit list (bulk delete) */
+
+.header-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.device-list .select {
+  margin: 0;
+  accent-color: var(--err);
+  cursor: pointer;
+}
+
+.device-list li.marked {
+  background: rgb(239 68 68 / 0.14);
+}
+
+.device-list li.marked:hover {
+  background: rgb(239 68 68 / 0.22);
+}
+
+.bulk-actions button.danger-button:disabled {
+  background: var(--panel-hover);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.delete-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.delete-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 1px 0;
+}
+
+.delete-list .num {
+  width: 18px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.delete-list .name {
+  font-weight: 600;
+  min-width: 90px;
+}
+
+.delete-list .addr {
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+/* Adding several devices */
+
+.form .hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form .hint code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: var(--text);
+}
+
+.host-preview {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.host-preview ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.host-preview li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 1px 0;
+}
+
+.host-preview .name {
+  font-weight: 600;
+  min-width: 90px;
+}
+
+.host-preview .addr {
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.host-preview .tag {
+  font-size: 11px;
+  color: var(--warn);
+}
+
 /* Modal + forms */
 
 .modal-backdrop {

@@ -33,6 +33,17 @@ describe('DeviceStore', () => {
     expect(new DeviceStore(path).list()).toEqual([])
   })
 
+  it('deletes several devices with one call and ignores unknown ids', () => {
+    const path = join(dir, 'devices.json')
+    const store = new DeviceStore(path)
+    const [a, b, c] = ['a', 'b', 'c'].map((name) => store.save({ ...input, name, host: `${name}.local` }))
+    store.deleteMany([a.id, c.id, 'nope'])
+    expect(new DeviceStore(path).list().map((d) => d.name)).toEqual(['b'])
+    store.deleteMany([])
+    store.deleteMany(['nope'])
+    expect(new DeviceStore(path).list()).toEqual([b])
+  })
+
   it('rejects invalid devices and unknown ids', () => {
     const store = new DeviceStore(join(dir, 'devices.json'))
     expect(() => store.save({ ...input, host: '' })).toThrow('Host is required')

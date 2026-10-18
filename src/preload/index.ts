@@ -41,6 +41,7 @@ const api = {
     list: (): Promise<Device[]> => ipcRenderer.invoke('devices:list'),
     save: (input: DeviceInput): Promise<Device> => ipcRenderer.invoke('devices:save', input),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('devices:delete', id),
+    removeMany: (ids: string[]): Promise<void> => ipcRenderer.invoke('devices:deleteMany', ids),
     pickKeyFile: (): Promise<string | null> => ipcRenderer.invoke('devices:pickKeyFile')
   },
 

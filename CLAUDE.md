@@ -42,9 +42,16 @@ The Electron binary downloads itself on first run if missing (`node node_modules
   - `terminals.ts`: one xterm instance per device, kept outside React; tiles attach/detach its DOM node, so page switches keep scrollback and don't resize terminals. Typed input goes through a replaceable handler (`setInputHandler`). App shortcuts and clipboard keys (from `@shared/keys`) are kept from reaching the device; right-click copies the selection or pastes
   - `components/`: `DeviceList`, `Tile`, `Pager`, `BroadcastBar` (with in-memory history), `BroadcastResults`, `ConfirmDanger`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
   - `broadcast.ts`: broadcast run types and the plain-text export format (no JSX, so tests can import it)
-- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`, `mirror.ts`, `keys.ts`, `danger.ts`)
+- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `hosts.ts`, `session.ts`, `paging.ts`, `settings.ts`, `mirror.ts`, `keys.ts`, `danger.ts`)
 - `tests/`: Vitest tests. `tests/helpers/sshServer.ts` is an in-process ssh2 server used by `sessionManager.test.ts`
 - `scripts/dev-ssh-server.mjs`: the `npm run dev:ssh` server
+
+## Adding devices
+
+- The device form has one **Host(s)** box instead of host + port: `parseHostList` in `src/shared/hosts.ts` reads `host`, `host:port`, `[ipv6]:port` and bare IPv6, separated by commas/semicolons/whitespace, stripping quotes and backticks and dropping duplicates (max 500). `planDevices` names them (`<name>-1…`, or the address) and reuses saved devices with the same address + username. `formatHost` turns a saved device back into the box text (port only when not 22).
+- Saved devices still have exactly one host and port; editing accepts one address only. The data model and `devices.json` are unchanged.
+- A bulk add with "Connect after adding" goes through `connectMany`, the same path as Connect all; prompts queued by a bulk action start with "Also use for the other devices" ticked.
+- **Edit list** mode (`selecting` / `selected` in `App.tsx`) swaps each row's send-to checkbox and buttons for a selection checkbox; **Delete N selected** confirms in `ConfirmDelete` and calls `devices:deleteMany`. The main process disconnects each device and forgets its saved secret, then `DeviceStore.deleteMany` writes once. `forgetDevices` in `App.tsx` is the single place that clears a deleted device from renderer state (tiles, prompts, send-to, selection, line trackers); use it for any new delete path.
 
 ## Grid behavior
 

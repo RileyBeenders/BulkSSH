@@ -110,6 +110,14 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 **Phase 6: Packaging** (done 2026-10-17; installer + portable built with an app icon. The unpacked app and portable exe were tested automatically; install, use and uninstall were tested by hand. Unsigned for now. A GitHub Actions workflow builds both on demand)
 - Windows installer or portable build; README with usage
 
+## v0.2
+
+- **Add many devices at once** (done 2026-10-17): the device form's Host and Port boxes became one **Host(s)** box that takes a list such as `127.0.0.1:22, 127.0.0.1:23, 127.0.0.1:2222`. Each address becomes a device with the shared username and login method, and they can be connected straight away with one password prompt.
+
+## v0.3
+
+- **Delete many devices at once** (done 2026-10-17): an **Edit list** mode in the device list with selection checkboxes, All / None / Invert, and one confirmed **Delete N selected**, which disconnects the devices and forgets their saved passwords.
+
 ## Future roadmap (after v1)
 
 Each item builds on the transport interface or session manager:

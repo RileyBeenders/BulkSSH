@@ -7,6 +7,8 @@ interface Props {
   message?: string
   // Other devices waiting for a password; offers to reuse this one for them.
   othersWaiting: number
+  // Tick "Also use for the other devices" to start with.
+  defaultUseForOthers?: boolean
   // OS encryption is available, so the secret can be remembered.
   canRemember: boolean
   onSubmit: (secret: string, useForOthers: boolean, remember: boolean) => void
@@ -16,9 +18,9 @@ interface Props {
 // Asks for a password or key passphrase. The value goes straight to the
 // connect call and is not kept anywhere in the UI state afterwards.
 export function SecretPrompt(props: Props): React.JSX.Element {
-  const { device, message, othersWaiting, canRemember, onSubmit, onClose } = props
+  const { device, message, othersWaiting, defaultUseForOthers, canRemember, onSubmit, onClose } = props
   const [secret, setSecret] = useState('')
-  const [useForOthers, setUseForOthers] = useState(false)
+  const [useForOthers, setUseForOthers] = useState(!!defaultUseForOthers)
   const [remember, setRemember] = useState(false)
   const isKey = device.auth.type === 'key'
 

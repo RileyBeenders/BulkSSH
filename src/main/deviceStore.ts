@@ -45,7 +45,15 @@ export class DeviceStore {
   }
 
   delete(id: string): void {
-    this.devices = this.devices.filter((d) => d.id !== id)
+    this.deleteMany([id])
+  }
+
+  // Removes several devices with a single write; unknown ids are ignored.
+  deleteMany(ids: readonly string[]): void {
+    const remove = new Set(ids)
+    const kept = this.devices.filter((d) => !remove.has(d.id))
+    if (kept.length === this.devices.length) return
+    this.devices = kept
     this.persist()
   }
 

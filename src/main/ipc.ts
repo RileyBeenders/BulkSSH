@@ -42,6 +42,15 @@ export function registerIpc({ win, devices, sessions, settings, credentials }: I
     credentials.delete(deviceId)
     devices.delete(deviceId)
   })
+  // Deleting a device also disconnects it and forgets its saved secret.
+  handle('devices:deleteMany', (ids: unknown) => {
+    if (!isIdList(ids)) throw new Error('Invalid device list')
+    for (const id of ids) {
+      sessions.close(id)
+      credentials.delete(id)
+    }
+    devices.deleteMany(ids)
+  })
 
   // The renderer only learns *whether* a secret is saved, never the secret.
   handle('credentials:status', () => ({ available: credentials.available(), saved: credentials.savedIds() }))

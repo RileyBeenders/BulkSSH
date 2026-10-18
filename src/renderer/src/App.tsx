@@ -10,7 +10,8 @@ import { BroadcastBar } from './components/BroadcastBar'
 import { formatResults, type BroadcastRun } from './broadcast'
 import { BroadcastResults } from './components/BroadcastResults'
 import { ConfirmDanger, type DangerConfirmation } from './components/ConfirmDanger'
-import { DeviceForm } from './components/DeviceForm'
+import { ConfirmDelete } from './components/ConfirmDelete'
+import { DeviceForm, type DeviceFormResult } from './components/DeviceForm'
 import { DeviceList } from './components/DeviceList'
 import { Pager } from './components/Pager'
 import { SecretPrompt } from './components/SecretPrompt'
@@ -31,6 +32,9 @@ interface PromptEntry {
   key: number
   device: Device
   message?: string
+  // Queued by a bulk action (Connect all, adding several devices): offer the
+  // same password for the rest of the queue by default.
+  bulk?: boolean
 }
 
 let promptKey = 0
@@ -49,6 +53,10 @@ export function App(): React.JSX.Element {
   const [editing, setEditing] = useState<Editing>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [prompts, setPrompts] = useState<PromptEntry[]>([])
+  // "Edit list" mode: pick several devices to delete at once.
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  const [confirmDelete, setConfirmDelete] = useState(false)
   // Devices that receive mirrored keystrokes and broadcast commands.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
   const [mirrorOn, setMirrorOn] = useState(false)
@@ -102,7 +110,7 @@ export function App(): React.JSX.Element {
     return s === 'connecting' || s === 'connected' || s === 'reconnecting'
   }
   const isConnected = (id: string): boolean => statusOf(id) === 'connected'
-  const modalOpen = editing !== null || showSettings || prompts.length > 0 || confirmation !== null
+  const modalOpen = editing !== null || showSettings || prompts.length > 0 || confirmation !== null || confirmDelete
 
   useEffect(() => {
     if (!revealId) return
@@ -224,9 +232,9 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const enqueuePrompt = useCallback((device: Device, message?: string) => {
+  const enqueuePrompt = useCallback((device: Device, message?: string, bulk = false) => {
     setPrompts((q) =>
-      q.some((p) => p.device.id === device.id) ? q : [...q, { key: ++promptKey, device, message }]
+      q.some((p) => p.device.id === device.id) ? q : [...q, { key: ++promptKey, device, message, bulk }]
     )
   }, [])
 
@@ -259,16 +267,20 @@ export function App(): React.JSX.Element {
     else void connect(device)
   }
 
-  const connectAll = (): void => {
-    const targets = devices.filter((d) => !isLive(d.id))
+  // Connects several devices: key-based and saved-password ones straight
+  // away, the rest through one queue of password prompts.
+  const connectMany = (list: Device[]): void => {
+    const targets = list.filter((d) => !isLive(d.id))
     if (targets.length === 0) return
     setActiveId(targets[0].id)
     for (const d of targets) {
-      if (needsPrompt(d)) enqueuePrompt(d)
+      if (needsPrompt(d)) enqueuePrompt(d, undefined, targets.length > 1)
       else void connect(d, undefined, false)
     }
     setRevealId(targets[0].id)
   }
+
+  const connectAll = (): void => connectMany(devices)
 
   const disconnectAll = (): void => {
     for (const d of devices) if (isLive(d.id)) void bridge?.session.close(d.id)
@@ -350,20 +362,58 @@ export function App(): React.JSX.Element {
   const onDelete = async (device: Device): Promise<void> => {
     if (!bridge || !window.confirm(`Delete "${device.name}"? This cannot be undone.`)) return
     await bridge.devices.remove(device.id)
-    closeTile(device)
-    setPrompts((q) => q.filter((p) => p.device.id !== device.id))
-    setChecked((set) => new Set([...set].filter((id) => id !== device.id)))
-    setDevices((ds) => ds.filter((d) => d.id !== device.id))
-    trackers.current.delete(device.id)
+    forgetDevices([device])
+  }
+
+  // Deletes the devices selected in "Edit list" mode (after confirmation).
+  const deleteSelected = async (): Promise<void> => {
+    if (!bridge) return
+    const doomed = devices.filter((d) => selected.has(d.id))
+    setConfirmDelete(false)
+    await bridge.devices.removeMany(doomed.map((d) => d.id))
+    forgetDevices(doomed)
+    setSelected(new Set())
+    if (doomed.length === devices.length) setSelecting(false)
+  }
+
+  // Drops deleted devices from every piece of UI state. (The main process
+  // has already disconnected them and forgotten their saved secrets.)
+  const forgetDevices = (gone: Device[]): void => {
+    const ids = new Set(gone.map((d) => d.id))
+    for (const d of gone) {
+      closeTile(d)
+      trackers.current.delete(d.id)
+    }
+    const keep = (id: string): boolean => !ids.has(id)
+    setPrompts((q) => q.filter((p) => keep(p.device.id)))
+    setChecked((set) => new Set([...set].filter(keep)))
+    setSelected((set) => new Set([...set].filter(keep)))
+    setDevices((ds) => ds.filter((d) => keep(d.id)))
     void refreshCredentials()
   }
 
-  const onSaved = (saved: Device): void => {
-    setDevices((ds) =>
-      ds.some((d) => d.id === saved.id) ? ds.map((d) => (d.id === saved.id ? saved : d)) : [...ds, saved]
-    )
+  const toggleSelected = (device: Device): void => {
+    setSelected((set) => {
+      const next = new Set(set)
+      if (next.has(device.id)) next.delete(device.id)
+      else next.add(device.id)
+      return next
+    })
+  }
+
+  const stopSelecting = (): void => {
+    setSelecting(false)
+    setSelected(new Set())
+  }
+
+  const onSaved = ({ devices: saved, connect: connectNow }: DeviceFormResult): void => {
+    setDevices((ds) => {
+      const next = ds.map((d) => saved.find((s) => s.id === d.id) ?? d)
+      return [...next, ...saved.filter((s) => !ds.some((d) => d.id === s.id))]
+    })
     setEditing(null)
-    setActiveId(saved.id)
+    if (saved.length > 0) setActiveId(saved[0].id)
+    if (connectNow) connectMany(saved)
   }
 
   // Password prompts are handled one at a time, in the order requested.
@@ -411,32 +461,74 @@ export function App(): React.JSX.Element {
   return (
     <div className="shell">
       <aside className="devices">
-        <div className="devices-header">
-          <h2>Devices</h2>
-          <button className="primary" onClick={() => setEditing({ device: null })} disabled={!bridge}>
-            + Add
-          </button>
-        </div>
-        <div className="bulk-actions">
-          <button onClick={connectAll} disabled={!bridge || liveCount === devices.length}>
-            Connect all
-          </button>
-          <button onClick={disconnectAll} disabled={liveCount === 0}>
-            Disconnect all
-          </button>
-        </div>
-        <div className="send-to-actions">
-          <span className="muted">Send to {checked.size}:</span>
-          <button onClick={checkAll} disabled={devices.length === 0}>
-            All
-          </button>
-          <button onClick={checkNone} disabled={checked.size === 0}>
-            None
-          </button>
-          <button onClick={checkInvert} disabled={devices.length === 0}>
-            Invert
-          </button>
-        </div>
+        {selecting ? (
+          <>
+            <div className="devices-header">
+              <h2>Edit list</h2>
+              <button className="primary" onClick={stopSelecting}>
+                Done
+              </button>
+            </div>
+            <div className="send-to-actions">
+              <span className="muted">{selected.size} selected:</span>
+              <button onClick={() => setSelected(new Set(devices.map((d) => d.id)))} disabled={devices.length === 0}>
+                All
+              </button>
+              <button onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
+                None
+              </button>
+              <button
+                onClick={() => setSelected((set) => new Set(devices.filter((d) => !set.has(d.id)).map((d) => d.id)))}
+                disabled={devices.length === 0}
+              >
+                Invert
+              </button>
+            </div>
+            <div className="bulk-actions">
+              <button className="danger-button" onClick={() => setConfirmDelete(true)} disabled={selected.size === 0}>
+                Delete {selected.size > 0 ? `${selected.size} ` : ''}selected
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="devices-header">
+              <h2>Devices</h2>
+              <span className="header-buttons">
+                <button
+                  onClick={() => setSelecting(true)}
+                  disabled={devices.length === 0}
+                  title="Select several devices to delete them at once"
+                >
+                  Edit list
+                </button>
+                <button className="primary" onClick={() => setEditing({ device: null })} disabled={!bridge}>
+                  + Add
+                </button>
+              </span>
+            </div>
+            <div className="bulk-actions">
+              <button onClick={connectAll} disabled={!bridge || liveCount === devices.length}>
+                Connect all
+              </button>
+              <button onClick={disconnectAll} disabled={liveCount === 0}>
+                Disconnect all
+              </button>
+            </div>
+            <div className="send-to-actions">
+              <span className="muted">Send to {checked.size}:</span>
+              <button onClick={checkAll} disabled={devices.length === 0}>
+                All
+              </button>
+              <button onClick={checkNone} disabled={checked.size === 0}>
+                None
+              </button>
+              <button onClick={checkInvert} disabled={devices.length === 0}>
+                Invert
+              </button>
+            </div>
+          </>
+        )}
         <DeviceList
           devices={devices}
           activeId={activeId}
@@ -444,6 +536,9 @@ export function App(): React.JSX.Element {
           checked={checked}
           onToggleChecked={toggleChecked}
           savedSecrets={savedSecrets}
+          selecting={selecting}
+          selected={selected}
+          onToggleSelected={toggleSelected}
           statusOf={statusOf}
           onSelect={onSelect}
           onConnect={onConnect}
@@ -520,6 +615,7 @@ export function App(): React.JSX.Element {
       {editing && (
         <DeviceForm
           device={editing.device}
+          existing={devices}
           hasSavedSecret={!!editing.device && savedSecrets.has(editing.device.id)}
           onForgetSecret={async (id) => {
             await bridge?.credentials.forget(id)
@@ -527,6 +623,15 @@ export function App(): React.JSX.Element {
           }}
           onSaved={onSaved}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {confirmDelete && (
+        <ConfirmDelete
+          devices={devices
+            .filter((d) => selected.has(d.id))
+            .map((d) => ({ device: d, number: numberOf(d.id), live: isLive(d.id), savedSecret: savedSecrets.has(d.id) }))}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => void deleteSelected()}
         />
       )}
       {confirmation && (
@@ -556,6 +661,7 @@ export function App(): React.JSX.Element {
           device={prompt.device}
           message={prompt.message}
           othersWaiting={otherPasswordPrompts.length}
+          defaultUseForOthers={!!prompt.bulk}
           onClose={() => setPrompts((q) => q.filter((p) => p !== prompt))}
           onSubmit={submitPrompt}
           canRemember={canRemember}
