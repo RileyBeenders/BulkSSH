@@ -96,7 +96,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Command-line broadcast with per-device output and exit status
 - Done when: typing in one terminal appears on all checked devices only, and one failing device does not affect the others
 
-**Phase 4: Focus mode**
+**Phase 4: Focus mode** (done 2026-10-17; verified with the dev server's full-screen `tui` program — alternate screen, colours, resize, arrows, cursor reports. Still to confirm with real vim/top on a real device)
 - Full-size single-device terminal (resize, copy/paste, colors); switch between grid and focus without dropping connections
 - Done when: vim/top work in a focus session
 

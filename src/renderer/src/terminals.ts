@@ -1,6 +1,9 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { clipboardAction, isAppShortcut } from '@shared/keys'
 import { bridge } from './bridge'
+
+export { isAppShortcut }
 
 // One xterm.js terminal per device, kept outside React so scrollback survives
 // switching pages (and, later, between grid and focus views).
@@ -23,12 +26,18 @@ export function setInputHandler(handler: InputHandler): void {
   inputHandler = handler
 }
 
-// Shortcuts the app handles even while a terminal has focus:
-// Ctrl+PageUp/PageDown change page, Ctrl+Shift+M toggles mirroring.
-export function isAppShortcut(e: KeyboardEvent): boolean {
-  if (!e.ctrlKey || e.altKey || e.metaKey) return false
-  if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) return true
-  return e.shiftKey && e.code === 'KeyM'
+// Pasted text goes through term.paste(), so it is handled exactly like typing:
+// bracketed-paste aware, and mirrored when mirroring is on.
+function copySelection(term: Terminal): void {
+  const text = term.getSelection()
+  if (text) void navigator.clipboard.writeText(text)
+  term.clearSelection()
+}
+
+function pasteInto(term: Terminal): void {
+  void navigator.clipboard.readText().then((text) => {
+    if (text) term.paste(text)
+  })
 }
 
 export function hasTerminal(deviceId: string): boolean {
@@ -83,12 +92,29 @@ function entry(deviceId: string): Entry {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    // Returning false lets the key bubble to the app instead of the device.
-    term.attachCustomKeyEventHandler((ev) => !isAppShortcut(ev))
+    // Returning false keeps the key from the device: app shortcuts bubble up
+    // to the app, clipboard keys are handled here.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (isAppShortcut(ev)) return false
+      const action = clipboardAction(ev, term.hasSelection())
+      if (!action) return true
+      if (ev.type === 'keydown') {
+        ev.preventDefault() // no second, native paste (Shift+Insert)
+        if (action === 'copy') copySelection(term)
+        else pasteInto(term)
+      }
+      return false
+    })
     term.onData((data) => inputHandler(deviceId, data))
     term.onResize(({ cols, rows }) => bridge?.session.resize(deviceId, cols, rows))
     const el = document.createElement('div')
     el.className = 'term-host'
+    // Right-click: copy the selection if there is one, otherwise paste.
+    el.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault()
+      if (term.hasSelection()) copySelection(term)
+      else pasteInto(term)
+    })
     e = { term, fit, el, opened: false }
     entries.set(deviceId, e)
   }

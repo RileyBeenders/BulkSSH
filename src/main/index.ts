@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, session as electronSession, shell } from 'electron'
 import { DeviceStore } from './deviceStore'
 import { registerIpc } from './ipc'
 import { KnownHosts } from './knownHosts'
@@ -92,7 +92,16 @@ async function confirmHostKey(
   return response === 1
 }
 
+// The renderer may use the clipboard (terminal copy/paste) and nothing else:
+// no camera, microphone, location, notifications, etc.
+const ALLOWED_PERMISSIONS = new Set(['clipboard-read', 'clipboard-sanitized-write'])
+
 app.whenReady().then(() => {
+  electronSession.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(ALLOWED_PERMISSIONS.has(permission))
+  )
+  electronSession.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
+
   const win = createWindow()
   const userData = app.getPath('userData')
   const devices = new DeviceStore(join(userData, 'devices.json'))

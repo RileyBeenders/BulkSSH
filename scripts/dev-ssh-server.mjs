@@ -6,7 +6,9 @@
 // Login with any username and the password "dev". The shell is a small fake
 // shell (no access to this machine): help, echo, whoami, hostname, date,
 // size, sleep, fail, fail-on, clear, exit. The same commands work as exec
-// commands (BulkSSH broadcast) and return real exit codes. The host key is
+// commands (BulkSSH broadcast) and return real exit codes. `tui` (shell
+// only) is a full-screen test program standing in for vim/top: alternate
+// screen, redraw on resize, colours, arrow keys and a cursor-position query. The host key is
 // kept in .dev-ssh/ so it stays trusted across restarts.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -52,15 +54,21 @@ function startServer(port, hostname) {
       client.on('session', (accept) => {
         const session = accept()
         const size = { cols: 80, rows: 24 }
+        const resizeListeners = new Set()
+        const onResize = (fn) => {
+          resizeListeners.add(fn)
+          return () => resizeListeners.delete(fn)
+        }
         session.on('pty', (ok, _no, info) => {
           Object.assign(size, { cols: info.cols, rows: info.rows })
           ok?.()
         })
         session.on('window-change', (ok, _no, info) => {
           Object.assign(size, { cols: info.cols, rows: info.rows })
+          for (const fn of resizeListeners) fn()
           ok?.()
         })
-        session.on('shell', (ok) => fakeShell(ok(), { username, hostname, size }))
+        session.on('shell', (ok) => fakeShell(ok(), { username, hostname, size, onResize }))
         session.on('exec', async (ok, _no, info) => {
           const channel = ok()
           const ctx = { username, hostname, size }
@@ -85,11 +93,13 @@ function fakeShell(channel, ctx) {
   const err = (text) => out(`\x1b[31m${text}\x1b[0m`)
   let line = ''
   let busy = false
+  let tui = null
 
   channel.write(`Welcome to ${ctx.hostname} (BulkSSH dev server). Type "help".\r\n`)
   prompt()
 
   channel.on('data', async (data) => {
+    if (tui) return tui.input(data.toString())
     for (const ch of data.toString()) {
       if (busy) {
         // Like a real terminal: Ctrl+C interrupts, other input is dropped.
@@ -100,6 +110,13 @@ function fakeShell(channel, ctx) {
         channel.write('\r\n')
         const cmd = line.trim()
         line = ''
+        if (cmd === 'tui') {
+          tui = startTui(channel, ctx, () => {
+            tui = null
+            prompt()
+          })
+          return
+        }
         busy = true
         const result = await runCommand(cmd, ctx, out, err, () => busy === 'interrupted')
         busy = false
@@ -122,6 +139,73 @@ function fakeShell(channel, ctx) {
   })
 }
 
+// Full-screen test program (stand-in for vim/top).
+function startTui(channel, ctx, done) {
+  let x = 0
+  let y = 0
+  let lastKey = '(none)'
+  let report = '(waiting)'
+  const write = (s) => channel.write(s)
+
+  const draw = () => {
+    const { cols, rows } = ctx.size
+    let s = '\x1b[0m\x1b[H\x1b[2J'
+    s += '\x1b[1;1H┌' + '─'.repeat(Math.max(0, cols - 2)) + '┐'
+    for (let r = 2; r < rows; r++) s += `\x1b[${r};1H│\x1b[${r};${cols}H│`
+    s += `\x1b[${rows};1H└` + '─'.repeat(Math.max(0, cols - 2)) + '┘'
+    const at = (r, text) => {
+      if (r > 1 && r < rows) s += `\x1b[${r};3H${text}\x1b[0m`
+    }
+    at(2, `\x1b[1mBulkSSH TUI test on ${ctx.hostname}\x1b[0m   size ${cols}x${rows}`)
+    at(4, '16 colours:  ' + Array.from({ length: 16 }, (_, i) => `\x1b[48;5;${i}m  `).join(''))
+    at(5, '256 colours: ' + Array.from({ length: 24 }, (_, i) => `\x1b[48;5;${16 + i * 9}m  `).join(''))
+    const width = Math.max(0, Math.min(48, cols - 18))
+    at(6, 'Truecolour:  ' + Array.from({ length: width }, (_, i) => {
+      const t = i / Math.max(1, width - 1)
+      return `\x1b[48;2;${Math.round(255 * t)};${Math.round(80 + 100 * (1 - t))};${Math.round(255 * (1 - t))}m `
+    }).join(''))
+    at(8, `Last key: ${lastKey}`)
+    at(9, `Cursor report: ${report}`)
+    at(rows - 1, 'Arrows move @   r: ask for a cursor report   q: quit')
+    const maxX = Math.max(0, cols - 5)
+    const maxY = Math.max(0, rows - 14)
+    x = Math.min(x, maxX)
+    y = Math.min(y, maxY)
+    s += `\x1b[${11 + y};${3 + x}H\x1b[33;1m@\x1b[0m`
+    write(s)
+  }
+
+  const unsubscribe = ctx.onResize(draw)
+  write('\x1b[?1049h\x1b[?25l') // alternate screen, hide cursor
+  draw()
+  write('\x1b[6n') // cursor position query, answered by the terminal
+
+  return {
+    input(data) {
+      const cpr = data.match(/^\x1b\[(\d+);(\d+)R$/)
+      if (cpr) {
+        report = `row ${cpr[1]}, col ${cpr[2]}`
+        return draw()
+      }
+      if (data === 'q') {
+        unsubscribe()
+        write('\x1b[?25h\x1b[?1049l') // show cursor, leave alternate screen
+        return done()
+      }
+      if (data === 'r') write('\x1b[6n')
+      const moves = { A: [0, -1], B: [0, 1], C: [1, 0], D: [-1, 0] }
+      const arrow = data.match(/^\x1b[[O]([ABCD])$/)
+      if (arrow) {
+        const [dx, dy] = moves[arrow[1]]
+        x = Math.max(0, x + dx)
+        y = Math.max(0, y + dy)
+      }
+      lastKey = JSON.stringify(data).slice(1, -1)
+      draw()
+    }
+  }
+}
+
 // Returns an exit code, or 'exit' to end a shell session.
 async function runCommand(cmd, ctx, out, err, interrupted = () => false) {
   const [name, ...args] = cmd.split(/\s+/)
@@ -131,7 +215,7 @@ async function runCommand(cmd, ctx, out, err, interrupted = () => false) {
       return 0
     case 'help':
       out('Commands: help, echo <text>, whoami, hostname, date, size, sleep <s>,')
-      out('          fail [code], fail-on <device number> [code], clear, exit')
+      out('          fail [code], fail-on <device number> [code], tui, clear, exit')
       return 0
     case 'echo':
       out(args.join(' '))

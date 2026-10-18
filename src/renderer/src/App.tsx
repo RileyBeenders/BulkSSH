@@ -41,6 +41,9 @@ export function App(): React.JSX.Element {
   // Devices that receive mirrored keystrokes and broadcast commands.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
   const [mirrorOn, setMirrorOn] = useState(false)
+  // Focus view: one device full size instead of the grid.
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const mirrorBeforeFocus = useRef(false)
   const [broadcast, setBroadcast] = useState<BroadcastRun | null>(null)
   const broadcastId = useRef(0)
 
@@ -79,21 +82,62 @@ export function App(): React.JSX.Element {
     setRevealId(null)
   }, [revealId, openDevices, pageSize])
 
+  const focusDevice = focusId && openSet.has(focusId) ? (devices.find((d) => d.id === focusId) ?? null) : null
+
   useEffect(() => {
     if (!activeId || modalOpen) return
     const frame = requestAnimationFrame(() => focusTerminal(activeId))
     return () => cancelAnimationFrame(frame)
-  }, [activeId, currentPage, modalOpen])
+  }, [activeId, currentPage, modalOpen, focusDevice])
 
   const goToPage = (target: number): void => {
     const next = clampPage(target, openDevices.length, pageSize)
     setPage(next)
     setActiveId(pageSlice(openDevices, next, pageSize)[0]?.id ?? null)
   }
-  const goToPageRef = useRef(goToPage)
-  goToPageRef.current = goToPage
-  const currentPageRef = useRef(currentPage)
-  currentPageRef.current = currentPage
+
+  // Entering focus view turns mirroring off so typing reaches only the focused
+  // device. Leaving restores the previous setting, unless mirroring was
+  // switched on again while in focus view.
+  const enterFocus = (deviceId: string): void => {
+    if (!focusDevice) {
+      mirrorBeforeFocus.current = mirrorOn
+      setMirrorOn(false)
+    }
+    setFocusId(deviceId)
+    setActiveId(deviceId)
+  }
+  const exitFocus = (): void => {
+    if (!focusDevice) return
+    if (!mirrorOn) setMirrorOn(mirrorBeforeFocus.current)
+    setFocusId(null)
+    setActiveId(focusDevice.id)
+    setRevealId(focusDevice.id)
+  }
+  // In focus view, step to the previous/next open device.
+  const stepFocus = (delta: number): void => {
+    if (!focusDevice || openDevices.length === 0) return
+    const index = openDevices.findIndex((d) => d.id === focusDevice.id)
+    const next = openDevices[(index + delta + openDevices.length) % openDevices.length]
+    setFocusId(next.id)
+    setActiveId(next.id)
+  }
+
+  const handleShortcut = (e: KeyboardEvent): void => {
+    if (e.code === 'KeyM') setMirrorOn((on) => !on)
+    else if (e.code === 'KeyF') {
+      if (focusDevice) exitFocus()
+      else if (activeId && openSet.has(activeId)) enterFocus(activeId)
+    } else {
+      const delta = e.key === 'PageDown' ? 1 : -1
+      if (focusDevice) stepFocus(delta)
+      else goToPage(currentPage + delta)
+    }
+  }
+  const shortcutRef = useRef(handleShortcut)
+  shortcutRef.current = handleShortcut
+  const modalOpenRef = useRef(modalOpen)
+  modalOpenRef.current = modalOpen
 
   // Mirror routing. Typed input always goes to the tile it was typed in (the
   // driver); with mirroring on it also goes to every other checked, connected
@@ -112,10 +156,9 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!isAppShortcut(e)) return
+      if (!isAppShortcut(e) || modalOpenRef.current) return
       e.preventDefault()
-      if (e.code === 'KeyM') setMirrorOn((on) => !on)
-      else goToPageRef.current(currentPageRef.current + (e.key === 'PageDown' ? 1 : -1))
+      shortcutRef.current(e)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -172,6 +215,10 @@ export function App(): React.JSX.Element {
     setOpenIds((ids) => ids.filter((id) => id !== device.id))
     disposeTerminal(device.id)
     if (activeId === device.id) setActiveId(null)
+    if (focusId === device.id) {
+      if (!mirrorOn) setMirrorOn(mirrorBeforeFocus.current)
+      setFocusId(null)
+    }
   }
 
   const toggleChecked = (device: Device): void => {
@@ -256,6 +303,23 @@ export function App(): React.JSX.Element {
 
   const liveCount = devices.filter((d) => isLive(d.id)).length
 
+  const renderTile = (d: Device, focused: boolean): React.JSX.Element => (
+    <Tile
+      key={d.id}
+      device={d}
+      number={numberOf(d.id)}
+      status={statusOf(d.id)}
+      active={d.id === activeId}
+      focused={focused}
+      mirror={mirrorRole(d.id)}
+      onActivate={() => setActiveId(d.id)}
+      onToggleFocus={() => (focused ? exitFocus() : enterFocus(d.id))}
+      onConnect={() => onConnect(d)}
+      onDisconnect={() => void bridge?.session.close(d.id)}
+      onClose={() => closeTile(d)}
+    />
+  )
+
   return (
     <div className="shell">
       <aside className="devices">
@@ -309,40 +373,46 @@ export function App(): React.JSX.Element {
       </aside>
 
       <main className="workspace">
-        <div className="toolbar">
-          <Pager page={currentPage} pages={pages} onPage={goToPage} />
-          <span className="grow" />
-          <span className="muted">
-            {liveCount} connected · {openDevices.length} open · {pageSize} per page
-          </span>
-        </div>
-        {pageDevices.length > 0 ? (
-          <div
-            className="grid"
-            style={{
-              gridTemplateColumns: `repeat(${shape.cols}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${shape.rows}, minmax(0, 1fr))`
-            }}
-          >
-            {pageDevices.map((d) => (
-              <Tile
-                key={d.id}
-                device={d}
-                number={numberOf(d.id)}
-                status={statusOf(d.id)}
-                active={d.id === activeId}
-                mirror={mirrorRole(d.id)}
-                onActivate={() => setActiveId(d.id)}
-                onConnect={() => onConnect(d)}
-                onDisconnect={() => void bridge?.session.close(d.id)}
-                onClose={() => closeTile(d)}
-              />
-            ))}
-          </div>
+        {focusDevice ? (
+          <>
+            <div className="toolbar">
+              <button onClick={exitFocus} title="Back to the grid (Ctrl+Shift+F)">
+                ← Grid
+              </button>
+              <span className="muted">
+                Focus: {openDevices.findIndex((d) => d.id === focusDevice.id) + 1} of {openDevices.length} open
+                devices · Ctrl+PageUp/PageDown for the previous/next one
+              </span>
+              <span className="grow" />
+              <span className="muted">{liveCount} connected</span>
+            </div>
+            <div className="focus-view">{renderTile(focusDevice, true)}</div>
+          </>
         ) : (
-          <div className="empty">
-            <p>{devices.length === 0 ? 'Add a device to get started.' : 'Connect a device to open it here.'}</p>
-          </div>
+          <>
+            <div className="toolbar">
+              <Pager page={currentPage} pages={pages} onPage={goToPage} />
+              <span className="grow" />
+              <span className="muted">
+                {liveCount} connected · {openDevices.length} open · {pageSize} per page
+              </span>
+            </div>
+            {pageDevices.length > 0 ? (
+              <div
+                className="grid"
+                style={{
+                  gridTemplateColumns: `repeat(${shape.cols}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${shape.rows}, minmax(0, 1fr))`
+                }}
+              >
+                {pageDevices.map((d) => renderTile(d, false))}
+              </div>
+            ) : (
+              <div className="empty">
+                <p>{devices.length === 0 ? 'Add a device to get started.' : 'Connect a device to open it here.'}</p>
+              </div>
+            )}
+          </>
         )}
         {broadcast && <BroadcastResults run={broadcast} onClose={() => setBroadcast(null)} />}
         <BroadcastBar

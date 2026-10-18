@@ -360,6 +360,21 @@ input:focus {
   color: var(--muted);
 }
 
+.focus-view {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 6px;
+}
+
+.focus-view .tile {
+  flex: 1;
+}
+
+.tile-header {
+  user-select: none;
+}
+
 /* Mirroring */
 
 .send-to-actions {
