@@ -465,9 +465,6 @@ export function App(): React.JSX.Element {
           <>
             <div className="devices-header">
               <h2>Edit list</h2>
-              <button className="primary" onClick={stopSelecting}>
-                Done
-              </button>
             </div>
             <div className="send-to-actions">
               <span className="muted">{selected.size} selected:</span>
@@ -484,28 +481,14 @@ export function App(): React.JSX.Element {
                 Invert
               </button>
             </div>
-            <div className="bulk-actions">
-              <button className="danger-button" onClick={() => setConfirmDelete(true)} disabled={selected.size === 0}>
-                Delete {selected.size > 0 ? `${selected.size} ` : ''}selected
-              </button>
-            </div>
           </>
         ) : (
           <>
             <div className="devices-header">
               <h2>Devices</h2>
-              <span className="header-buttons">
-                <button
-                  onClick={() => setSelecting(true)}
-                  disabled={devices.length === 0}
-                  title="Select several devices to delete them at once"
-                >
-                  Edit list
-                </button>
-                <button className="primary" onClick={() => setEditing({ device: null })} disabled={!bridge}>
-                  + Add
-                </button>
-              </span>
+              <button className="primary" onClick={() => setEditing({ device: null })} disabled={!bridge}>
+                + Add
+              </button>
             </div>
             <div className="bulk-actions">
               <button onClick={connectAll} disabled={!bridge || liveCount === devices.length}>
@@ -547,12 +530,36 @@ export function App(): React.JSX.Element {
           onDelete={(d) => void onDelete(d)}
         />
         <footer className="sidebar-footer">
-          <span className="muted">
-            {bridge ? `BulkSSH ${version}` : 'Browser preview: SSH is only available in the BulkSSH app'}
-          </span>
-          <button onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">
-            ⚙
-          </button>
+          {selecting ? (
+            <>
+              <button
+                className="danger-button grow"
+                onClick={() => setConfirmDelete(true)}
+                disabled={selected.size === 0}
+              >
+                Delete {selected.size > 0 ? `${selected.size} ` : ''}selected
+              </button>
+              <button className="primary" onClick={stopSelecting}>
+                Done
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="muted grow">
+                {bridge ? `BulkSSH ${version}` : 'Browser preview: SSH is only available in the BulkSSH app'}
+              </span>
+              <button
+                onClick={() => setSelecting(true)}
+                disabled={devices.length === 0}
+                title="Select several devices to delete them at once"
+              >
+                Edit list
+              </button>
+              <button onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">
+                ⚙
+              </button>
+            </>
+          )}
         </footer>
       </aside>
 

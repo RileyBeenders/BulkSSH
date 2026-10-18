@@ -118,6 +118,10 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 
 - **Delete many devices at once** (done 2026-10-17): an **Edit list** mode in the device list with selection checkboxes, All / None / Invert, and one confirmed **Delete N selected**, which disconnects the devices and forgets their saved passwords.
 
+## v1.0.0
+
+- Released 2026-10-17 as the first GitHub release (`v1.0.0`): everything above plus the Edit list / Delete controls moved to the bottom of the sidebar, and a short README.
+
 ## Future roadmap (after v1)
 
 Each item builds on the transport interface or session manager:

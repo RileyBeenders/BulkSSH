@@ -125,7 +125,8 @@ input:focus {
   justify-content: space-between;
   gap: 8px;
   margin-top: auto;
-  padding-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 /* Device list */
@@ -627,11 +628,6 @@ button.danger-button {
 
 /* Edit list (bulk delete) */
 
-.header-buttons {
-  display: flex;
-  gap: 6px;
-}
-
 .device-list .select {
   margin: 0;
   accent-color: var(--err);
@@ -646,7 +642,7 @@ button.danger-button {
   background: rgb(239 68 68 / 0.22);
 }
 
-.bulk-actions button.danger-button:disabled {
+.sidebar-footer button.danger-button:disabled {
   background: var(--panel-hover);
   border-color: var(--border);
   color: var(--muted);

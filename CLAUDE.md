@@ -1,10 +1,10 @@
 # BulkSSH
 
-A Windows desktop app for working with many SSH devices at once. [README.md](README.md) is the user guide; keep it in step with features and shortcuts.
+A Windows desktop app for working with many SSH devices at once. [README.md](README.md) is a deliberately short overview (features, install, quick start, shortcuts, build); keep it brief and in step with the app.
 
 ## Project status
 
-Phases 0–5 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring, command broadcast with per-device exit codes, a full-size focus view with copy/paste, confirmation of risky commands, opt-in saved passwords (OS-encrypted), auto-reconnect, command history, export, and recovery from renderer crashes. Phase 6 (packaging) is done too: Windows installer + portable exe. v1 is complete; what's next is in the plan's Future roadmap (telnet, serial, SFTP, …). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0–5 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring, command broadcast with per-device exit codes, a full-size focus view with copy/paste, confirmation of risky commands, opt-in saved passwords (OS-encrypted), auto-reconnect, command history, export, and recovery from renderer crashes. Phase 6 (packaging) is done too, and so are the v0.2/v0.3 additions (multi-host add, bulk delete). **Released as 1.0.0** (GitHub release `v1.0.0`). What's next is in the plan's Future roadmap (telnet, serial, SFTP, …). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
@@ -51,7 +51,7 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 - The device form has one **Host(s)** box instead of host + port: `parseHostList` in `src/shared/hosts.ts` reads `host`, `host:port`, `[ipv6]:port` and bare IPv6, separated by commas/semicolons/whitespace, stripping quotes and backticks and dropping duplicates (max 500). `planDevices` names them (`<name>-1…`, or the address) and reuses saved devices with the same address + username. `formatHost` turns a saved device back into the box text (port only when not 22).
 - Saved devices still have exactly one host and port; editing accepts one address only. The data model and `devices.json` are unchanged.
 - A bulk add with "Connect after adding" goes through `connectMany`, the same path as Connect all; prompts queued by a bulk action start with "Also use for the other devices" ticked.
-- **Edit list** mode (`selecting` / `selected` in `App.tsx`) swaps each row's send-to checkbox and buttons for a selection checkbox; **Delete N selected** confirms in `ConfirmDelete` and calls `devices:deleteMany`. The main process disconnects each device and forgets its saved secret, then `DeviceStore.deleteMany` writes once. `forgetDevices` in `App.tsx` is the single place that clears a deleted device from renderer state (tiles, prompts, send-to, selection, line trackers); use it for any new delete path.
+- **Edit list** mode (`selecting` / `selected` in `App.tsx`; its button is at the bottom of the sidebar, and in the mode that bottom bar becomes **Delete N selected** / **Done**) swaps each row's send-to checkbox and buttons for a selection checkbox; **Delete N selected** confirms in `ConfirmDelete` and calls `devices:deleteMany`. The main process disconnects each device and forgets its saved secret, then `DeviceStore.deleteMany` writes once. `forgetDevices` in `App.tsx` is the single place that clears a deleted device from renderer state (tiles, prompts, send-to, selection, line trackers); use it for any new delete path.
 
 ## Grid behavior
 
