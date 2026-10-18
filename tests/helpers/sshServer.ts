@@ -61,6 +61,23 @@ export async function startTestServer(opts: TestServerOptions): Promise<TestServ
           resizes.push(info)
           accept?.()
         })
+        session.on('exec', (accept, _reject, info) => {
+          const channel = accept()
+          const [name, arg] = info.command.split(' ')
+          if (name === 'hang') return
+          if (name === 'exit') {
+            channel.write('bye\n')
+            channel.stderr.write('oops\n')
+            channel.exit(Number(arg))
+          } else if (name === 'big') {
+            channel.write('x'.repeat(Number(arg)))
+            channel.exit(0)
+          } else {
+            channel.write(`ran:${info.command}`)
+            channel.exit(0)
+          }
+          channel.end()
+        })
         session.on('shell', (accept) => {
           const channel = accept()
           channel.write('welcome\r\n')

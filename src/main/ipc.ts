@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import type { DeviceInput } from '@shared/device'
-import type { ConnectRequest } from '@shared/session'
+import { MAX_COMMAND_LENGTH, type ConnectRequest } from '@shared/session'
 import type { DeviceStore } from './deviceStore'
 import type { SessionManager } from './sessionManager'
 import type { SettingsStore } from './settingsStore'
@@ -43,11 +43,21 @@ export function registerIpc(
 
   handle('session:connect', (req: unknown) => sessions.connect(parseConnect(req)))
   handle('session:close', (id: unknown) => sessions.close(requireString(id, 'deviceId')))
+  handle('session:exec', (id: unknown, command: unknown) => {
+    if (typeof command !== 'string' || command.trim() === '' || command.length > MAX_COMMAND_LENGTH) {
+      throw new Error('Invalid command')
+    }
+    return sessions.exec(requireString(id, 'deviceId'), command, settings.get().broadcastTimeoutSec * 1000)
+  })
 
   // High-frequency, fire-and-forget channels.
   ipcMain.on('session:write', (e, id: unknown, data: unknown) => {
     if (!fromWindow(e) || typeof id !== 'string' || typeof data !== 'string') return
     sessions.write(id, data)
+  })
+  ipcMain.on('session:writeMany', (e, ids: unknown, data: unknown) => {
+    if (!fromWindow(e) || !isIdList(ids) || typeof data !== 'string') return
+    sessions.writeMany(ids, data)
   })
   ipcMain.on('session:resize', (e, id: unknown, cols: unknown, rows: unknown) => {
     if (!fromWindow(e) || typeof id !== 'string' || !isDimension(cols) || !isDimension(rows)) return
@@ -70,6 +80,10 @@ function parseConnect(req: unknown): ConnectRequest {
 function requireString(v: unknown, name: string): string {
   if (typeof v !== 'string' || v === '') throw new Error(`Invalid ${name}`)
   return v
+}
+
+function isIdList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length <= 1000 && v.every((id) => typeof id === 'string' && id !== '')
 }
 
 function isDimension(v: unknown): v is number {

@@ -4,6 +4,7 @@ import type { Settings } from '@shared/settings'
 import type {
   ConnectRequest,
   ConnectResult,
+  ExecResult,
   SessionDataEvent,
   SessionStatusEvent
 } from '@shared/session'
@@ -36,6 +37,9 @@ const api = {
     connect: (req: ConnectRequest): Promise<ConnectResult> => ipcRenderer.invoke('session:connect', req),
     close: (deviceId: string): Promise<void> => ipcRenderer.invoke('session:close', deviceId),
     write: (deviceId: string, data: string): void => ipcRenderer.send('session:write', deviceId, data),
+    writeMany: (deviceIds: string[], data: string): void => ipcRenderer.send('session:writeMany', deviceIds, data),
+    exec: (deviceId: string, command: string): Promise<ExecResult> =>
+      ipcRenderer.invoke('session:exec', deviceId, command),
     resize: (deviceId: string, cols: number, rows: number): void =>
       ipcRenderer.send('session:resize', deviceId, cols, rows),
     onData: (listener: (e: SessionDataEvent) => void) => subscribe('session:data', listener),

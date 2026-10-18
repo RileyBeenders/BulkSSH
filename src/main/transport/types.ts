@@ -10,6 +10,21 @@ export interface Transport {
   onData(listener: (data: Uint8Array) => void): void
   // Fires once, after connect() resolved, when the connection ends.
   onClose(listener: (reason?: string) => void): void
+  // Runs one command outside the interactive shell and collects its output
+  // and exit status. Optional: not every protocol can do this (e.g. serial).
+  exec?(command: string, options: ExecOptions): Promise<ExecOutcome>
+}
+
+export interface ExecOptions {
+  timeoutMs: number
+  maxOutputBytes: number
+}
+
+export interface ExecOutcome {
+  code: number | null
+  signal?: string
+  output: string
+  truncated: boolean
 }
 
 export interface HostKeyInfo {

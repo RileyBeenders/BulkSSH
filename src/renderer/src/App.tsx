@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Device } from '@shared/device'
+import { isTerminalReport, mirrorTargets } from '@shared/mirror'
 import { clampPage, gridShape, pageCount, pageOf, pageSlice } from '@shared/paging'
-import type { SessionStatusEvent } from '@shared/session'
+import type { ExecResult, SessionStatusEvent } from '@shared/session'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import { bridge } from './bridge'
+import { BroadcastBar } from './components/BroadcastBar'
+import { BroadcastResults, type BroadcastRun } from './components/BroadcastResults'
 import { DeviceForm } from './components/DeviceForm'
 import { DeviceList } from './components/DeviceList'
 import { Pager } from './components/Pager'
 import { SecretPrompt } from './components/SecretPrompt'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Tile } from './components/Tile'
-import { disposeTerminal, focusTerminal, getTerminal, hasTerminal, isAppShortcut } from './terminals'
+import { disposeTerminal, focusTerminal, getTerminal, hasTerminal, isAppShortcut, setInputHandler } from './terminals'
 
 type Editing = { device: Device | null } | null
 interface PromptEntry {
@@ -35,6 +38,11 @@ export function App(): React.JSX.Element {
   const [editing, setEditing] = useState<Editing>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [prompts, setPrompts] = useState<PromptEntry[]>([])
+  // Devices that receive mirrored keystrokes and broadcast commands.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
+  const [mirrorOn, setMirrorOn] = useState(false)
+  const [broadcast, setBroadcast] = useState<BroadcastRun | null>(null)
+  const broadcastId = useRef(0)
 
   const devicesRef = useRef(devices)
   devicesRef.current = devices
@@ -61,6 +69,7 @@ export function App(): React.JSX.Element {
   const numberOf = (id: string): number => devices.findIndex((d) => d.id === id) + 1
   const statusOf = (id: string) => statuses[id]?.status
   const isLive = (id: string): boolean => statusOf(id) === 'connecting' || statusOf(id) === 'connected'
+  const isConnected = (id: string): boolean => statusOf(id) === 'connected'
   const modalOpen = editing !== null || showSettings || prompts.length > 0
 
   useEffect(() => {
@@ -86,11 +95,27 @@ export function App(): React.JSX.Element {
   const currentPageRef = useRef(currentPage)
   currentPageRef.current = currentPage
 
+  // Mirror routing. Typed input always goes to the tile it was typed in (the
+  // driver); with mirroring on it also goes to every other checked, connected
+  // device. Terminal replies (cursor reports, mouse events…) are never mirrored.
+  const mirrorState = useRef({ mirrorOn, checked, isConnected })
+  mirrorState.current = { mirrorOn, checked, isConnected }
+  useEffect(() => {
+    setInputHandler((deviceId, data) => {
+      if (!bridge) return
+      const m = mirrorState.current
+      const targets = m.mirrorOn && !isTerminalReport(data) ? mirrorTargets(deviceId, m.checked, m.isConnected) : []
+      if (targets.length > 0) bridge.session.writeMany([deviceId, ...targets], data)
+      else bridge.session.write(deviceId, data)
+    })
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!isAppShortcut(e)) return
       e.preventDefault()
-      goToPageRef.current(currentPageRef.current + (e.key === 'PageDown' ? 1 : -1))
+      if (e.code === 'KeyM') setMirrorOn((on) => !on)
+      else goToPageRef.current(currentPageRef.current + (e.key === 'PageDown' ? 1 : -1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -149,6 +174,51 @@ export function App(): React.JSX.Element {
     if (activeId === device.id) setActiveId(null)
   }
 
+  const toggleChecked = (device: Device): void => {
+    setChecked((set) => {
+      const next = new Set(set)
+      if (next.has(device.id)) next.delete(device.id)
+      else next.add(device.id)
+      return next
+    })
+  }
+  const checkAll = (): void => setChecked(new Set(devices.map((d) => d.id)))
+  const checkNone = (): void => setChecked(new Set())
+  const checkInvert = (): void => setChecked((set) => new Set(devices.filter((d) => !set.has(d.id)).map((d) => d.id)))
+
+  const broadcastTargets = devices.filter((d) => checked.has(d.id) && isConnected(d.id))
+  const driver = activeId && openSet.has(activeId) ? devices.find((d) => d.id === activeId) ?? null : null
+  const liveMirrorTargets = mirrorOn && driver ? mirrorTargets(driver.id, checked, isConnected) : []
+  const mirrorRole = (id: string): 'driver' | 'target' | null => {
+    if (liveMirrorTargets.length === 0) return null
+    if (id === driver?.id) return 'driver'
+    return liveMirrorTargets.includes(id) ? 'target' : null
+  }
+
+  // Runs the command on every target in parallel; each row fills in as its
+  // device answers, so one slow or failing device never holds up the rest.
+  const runBroadcast = (command: string): void => {
+    if (!bridge) return
+    const id = ++broadcastId.current
+    setBroadcast({
+      id,
+      command,
+      rows: broadcastTargets.map((d) => ({ deviceId: d.id, number: numberOf(d.id), name: d.name }))
+    })
+    for (const d of broadcastTargets) {
+      bridge.session
+        .exec(d.id, command)
+        .catch((err: unknown): ExecResult => ({ ok: false, message: String(err), durationMs: 0 }))
+        .then((result) =>
+          setBroadcast((run) =>
+            run && run.id === id
+              ? { ...run, rows: run.rows.map((r) => (r.deviceId === d.id ? { ...r, result } : r)) }
+              : run
+          )
+        )
+    }
+  }
+
   const onSelect = (device: Device): void => {
     setActiveId(device.id)
     if (openSet.has(device.id)) setRevealId(device.id)
@@ -159,6 +229,7 @@ export function App(): React.JSX.Element {
     await bridge.devices.remove(device.id)
     closeTile(device)
     setPrompts((q) => q.filter((p) => p.device.id !== device.id))
+    setChecked((set) => new Set([...set].filter((id) => id !== device.id)))
     setDevices((ds) => ds.filter((d) => d.id !== device.id))
   }
 
@@ -202,10 +273,24 @@ export function App(): React.JSX.Element {
             Disconnect all
           </button>
         </div>
+        <div className="send-to-actions">
+          <span className="muted">Send to {checked.size}:</span>
+          <button onClick={checkAll} disabled={devices.length === 0}>
+            All
+          </button>
+          <button onClick={checkNone} disabled={checked.size === 0}>
+            None
+          </button>
+          <button onClick={checkInvert} disabled={devices.length === 0}>
+            Invert
+          </button>
+        </div>
         <DeviceList
           devices={devices}
           activeId={activeId}
           openIds={openSet}
+          checked={checked}
+          onToggleChecked={toggleChecked}
           statusOf={statusOf}
           onSelect={onSelect}
           onConnect={onConnect}
@@ -246,6 +331,7 @@ export function App(): React.JSX.Element {
                 number={numberOf(d.id)}
                 status={statusOf(d.id)}
                 active={d.id === activeId}
+                mirror={mirrorRole(d.id)}
                 onActivate={() => setActiveId(d.id)}
                 onConnect={() => onConnect(d)}
                 onDisconnect={() => void bridge?.session.close(d.id)}
@@ -258,6 +344,16 @@ export function App(): React.JSX.Element {
             <p>{devices.length === 0 ? 'Add a device to get started.' : 'Connect a device to open it here.'}</p>
           </div>
         )}
+        {broadcast && <BroadcastResults run={broadcast} onClose={() => setBroadcast(null)} />}
+        <BroadcastBar
+          mirrorOn={mirrorOn}
+          onToggleMirror={() => setMirrorOn((on) => !on)}
+          driverName={driver?.name ?? null}
+          mirrorCount={driver ? liveMirrorTargets.length : mirrorTargets('', checked, isConnected).length}
+          targetCount={broadcastTargets.length}
+          running={!!broadcast?.rows.some((r) => !r.result)}
+          onRun={runBroadcast}
+        />
       </main>
 
       {editing && <DeviceForm device={editing.device} onSaved={onSaved} onClose={() => setEditing(null)} />}

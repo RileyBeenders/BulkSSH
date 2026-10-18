@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2'
-import type { HostKeyVerifier, Transport } from './types'
+import type { ExecOptions, ExecOutcome, HostKeyVerifier, Transport } from './types'
 
 export interface SshTransportOptions {
   host: string
@@ -98,6 +98,46 @@ export class SshTransport implements Transport {
       } catch (err) {
         fail(err as Error)
       }
+    })
+  }
+
+  exec(command: string, { timeoutMs, maxOutputBytes }: ExecOptions): Promise<ExecOutcome> {
+    return new Promise((resolve, reject) => {
+      if (!this.connected || this.closed) return reject(new Error('Not connected'))
+      this.client.exec(command, (err, stream) => {
+        if (err) return reject(new Error(`Could not run command: ${err.message}`))
+
+        const chunks: Buffer[] = []
+        let size = 0
+        let truncated = false
+        let code: number | null = null
+        let signal: string | undefined
+        const collect = (d: Buffer): void => {
+          if (size >= maxOutputBytes) {
+            truncated = true
+            return
+          }
+          const part = d.subarray(0, maxOutputBytes - size)
+          if (part.length < d.length) truncated = true
+          chunks.push(part)
+          size += part.length
+        }
+        const timer = setTimeout(() => {
+          stream.close()
+          reject(new Error(`Timed out after ${Math.round(timeoutMs / 1000)} s`))
+        }, timeoutMs)
+
+        stream.on('data', collect)
+        stream.stderr.on('data', collect)
+        stream.on('exit', (exitCode: number | null, exitSignal?: string) => {
+          code = exitCode
+          signal = exitSignal ?? undefined
+        })
+        stream.on('close', () => {
+          clearTimeout(timer)
+          resolve({ code, signal, output: Buffer.concat(chunks).toString('utf8'), truncated })
+        })
+      })
     })
   }
 

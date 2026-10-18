@@ -91,7 +91,7 @@ Chosen in Phase 0: `electron-vite` (bundler), React (UI), Vitest (tests), electr
 - Grid of live tiles; settings for max devices per page; page navigation
 - Done when: 10+ devices spread over several pages, each tile live, with fast page switching
 
-**Phase 3: Mirroring and broadcast**
+**Phase 3: Mirroring and broadcast** (done 2026-10-17; broadcast uses SSH exec channels for real exit codes, with a per-device timeout setting)
 - Mirror checkbox per device; mirror router fanning keystrokes out to checked devices
 - Command-line broadcast with per-device output and exit status
 - Done when: typing in one terminal appears on all checked devices only, and one failing device does not affect the others

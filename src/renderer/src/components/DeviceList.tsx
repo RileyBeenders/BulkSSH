@@ -5,6 +5,8 @@ interface Props {
   devices: Device[]
   activeId: string | null
   openIds: ReadonlySet<string>
+  checked: ReadonlySet<string>
+  onToggleChecked: (device: Device) => void
   statusOf: (id: string) => SessionStatus | undefined
   onSelect: (device: Device) => void
   onConnect: (device: Device) => void
@@ -14,7 +16,7 @@ interface Props {
 }
 
 export function DeviceList(props: Props): React.JSX.Element {
-  const { devices, activeId, openIds, statusOf } = props
+  const { devices, activeId, openIds, checked, statusOf } = props
   if (devices.length === 0) return <p className="muted">No devices yet.</p>
 
   return (
@@ -25,6 +27,15 @@ export function DeviceList(props: Props): React.JSX.Element {
         const classes = [d.id === activeId && 'selected', openIds.has(d.id) && 'open'].filter(Boolean).join(' ')
         return (
           <li key={d.id} className={classes || undefined} onClick={() => props.onSelect(d)}>
+            <input
+              type="checkbox"
+              className="send-to"
+              checked={checked.has(d.id)}
+              onChange={() => props.onToggleChecked(d)}
+              onClick={(e) => e.stopPropagation()}
+              title="Send mirrored keystrokes and broadcasts to this device"
+              aria-label={`Send to ${d.name}`}
+            />
             <span className="num">{i + 1}</span>
             <span className={`dot ${status ?? 'idle'}`} title={status ?? 'not connected'} />
             <span className="label">

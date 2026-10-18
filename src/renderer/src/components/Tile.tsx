@@ -14,6 +14,8 @@ interface Props {
   number: number
   status: SessionStatus | undefined
   active: boolean
+  // 'driver': mirrored keystrokes come from this tile; 'target': they go to it.
+  mirror: 'driver' | 'target' | null
   onActivate: () => void
   onConnect: () => void
   onDisconnect: () => void
@@ -27,7 +29,7 @@ export function Tile(props: Props): React.JSX.Element {
 
   return (
     <section
-      className={`tile${props.active ? ' active' : ''}`}
+      className={`tile${props.active ? ' active' : ''}${props.mirror ? ` mirror-${props.mirror}` : ''}`}
       aria-label={`${props.number}: ${device.name}`}
       onFocus={props.onActivate}
       onMouseDown={props.onActivate}
@@ -37,6 +39,14 @@ export function Tile(props: Props): React.JSX.Element {
         <span className={`dot ${status ?? 'idle'}`} />
         <span className="name">{device.name}</span>
         <span className={`status ${status ?? 'idle'}`}>{status ? STATUS_TEXT[status] : 'Not connected'}</span>
+        {props.mirror && (
+          <span
+            className={`badge ${props.mirror}`}
+            title={props.mirror === 'driver' ? 'Keystrokes typed here are mirrored to checked devices' : 'Receives mirrored keystrokes'}
+          >
+            {props.mirror === 'driver' ? 'source' : 'mirrored'}
+          </span>
+        )}
         <span className="grow" />
         {live ? (
           <button onClick={props.onDisconnect} title="Disconnect" aria-label={`Disconnect ${device.name}`}>

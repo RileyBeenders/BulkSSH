@@ -28,3 +28,21 @@ export type ConnectResult =
   // needsSecret: the key is encrypted and no (or a wrong) passphrase was given,
   // or password auth was attempted without a password.
   | { ok: false; message: string; needsSecret?: boolean }
+
+// Result of running one broadcast command on one device (an SSH exec
+// channel, separate from the interactive shell).
+export type ExecResult =
+  | {
+      ok: true
+      // Exit code, or null if the command was killed by a signal.
+      code: number | null
+      signal?: string
+      // stdout and stderr interleaved in arrival order.
+      output: string
+      truncated: boolean
+      durationMs: number
+    }
+  | { ok: false; message: string; durationMs: number }
+
+export const MAX_EXEC_OUTPUT_BYTES = 64 * 1024
+export const MAX_COMMAND_LENGTH = 10_000

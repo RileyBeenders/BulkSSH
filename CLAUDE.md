@@ -4,7 +4,7 @@ A program for connecting to multiple SSH clients at once (see [README.md](README
 
 ## Project status
 
-Phases 0–2 are done: saved devices, password/key auth, host-key trust, and a paged grid of live terminal tiles (connect/disconnect all, configurable devices per page). Next is Phase 3 (keystroke mirroring and command broadcast). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
+Phases 0–3 are done: saved devices, password/key auth, host-key trust, a paged grid of live terminal tiles, keystroke mirroring to checked devices, and command broadcast with per-device exit codes. Next is Phase 4 (focus mode). The plan is in [.projectPlan/PLAN.md](.projectPlan/PLAN.md); read it before making architectural decisions.
 
 ## Stack
 
@@ -23,7 +23,7 @@ v1 is SSH only, but all connections go through a transport interface so telnet, 
 - `npm test`: run Vitest once (`npm run test:watch` to watch)
 - `npm run build`: typecheck and build to `out/`
 - `npm run dist`: build a Windows installer and portable exe into `dist/`
-- `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225). Any username, password `dev`. It runs a fake shell (`help`, `echo`, `size`, …), never a real one; its host key lives in `.dev-ssh/` (gitignored).
+- `npm run dev:ssh`: local SSH server on `127.0.0.1:2222` for manual testing (`-- --count 4` for 2222–2225). Any username, password `dev`. It runs a fake shell, never a real one; the same commands work over exec for broadcasts with real exit codes (`hostname`, `size`, `sleep <s>`, `fail [code]`, `fail-on <device number>`, …). Its host key lives in `.dev-ssh/` (gitignored).
 
 The Electron binary downloads itself on first run if missing (`node node_modules/electron/install.js` forces it).
 
@@ -32,15 +32,15 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 - `src/main/`: Electron main process
   - `index.ts`: window, host-key confirmation dialogs, wiring
   - `ipc.ts`: all IPC handlers; validates every argument and rejects other senders
-  - `sessionManager.ts`: one session per device (keyed by deviceId), credentials, host-key checks
-  - `transport/`: `Transport` interface + `SshTransport`; new protocols go here
+  - `sessionManager.ts`: one session per device (keyed by deviceId), credentials, host-key checks, `writeMany` (mirroring) and `exec` (broadcast; never throws, returns `{ ok: false }` instead)
+  - `transport/`: `Transport` interface + `SshTransport`; new protocols go here. `exec` is optional on the interface (serial won't have it)
   - `deviceStore.ts`, `knownHosts.ts`, `settingsStore.ts`, `jsonFile.ts`: JSON persistence in Electron's `userData` folder (`devices.json`, `known_hosts.json`, `settings.json`)
 - `src/preload/`: the only renderer bridge, exposed as `window.bulkssh`; types in `index.d.ts`
 - `src/renderer/src/`: React UI
-  - `App.tsx`: state for devices, open tiles, paging, the active tile and the password-prompt queue
-  - `terminals.ts`: one xterm instance per device, kept outside React; tiles attach/detach its DOM node, so page switches keep scrollback and don't resize terminals. App shortcuts (`isAppShortcut`, currently Ctrl+PageUp/PageDown) are blocked from reaching the device
-  - `components/`: `DeviceList`, `Tile`, `Pager`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
-- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`)
+  - `App.tsx`: state for devices, open tiles, paging, the active tile, the password-prompt queue, the checked ("send to") set, mirror mode and the current broadcast; installs the mirror input handler
+  - `terminals.ts`: one xterm instance per device, kept outside React; tiles attach/detach its DOM node, so page switches keep scrollback and don't resize terminals. Typed input goes through a replaceable handler (`setInputHandler`). App shortcuts (`isAppShortcut`: Ctrl+PageUp/PageDown, Ctrl+Shift+M) are blocked from reaching the device
+  - `components/`: `DeviceList`, `Tile`, `Pager`, `BroadcastBar`, `BroadcastResults`, `DeviceForm`, `SecretPrompt`, `SettingsDialog`, `Modal`, `TerminalView`
+- `src/shared/`: pure TypeScript shared by all processes, imported as `@shared/...` (`device.ts`, `session.ts`, `paging.ts`, `settings.ts`, `mirror.ts`)
 - `tests/`: Vitest tests. `tests/helpers/sshServer.ts` is an in-process ssh2 server used by `sessionManager.test.ts`
 - `scripts/dev-ssh-server.mjs`: the `npm run dev:ssh` server
 
@@ -51,6 +51,12 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 - "Connect all" queues password prompts one at a time; the prompt offers to reuse the password for the other waiting devices. The password lives only in that call, never in state.
 - Host-key dialogs are queued in the main process so bulk connects never stack them.
 
+## Mirroring and broadcast
+
+- The checkbox on each device row is the "send to" set, shared by mirroring and broadcast. It starts empty and is not saved.
+- Mirror mode (button or Ctrl+Shift+M): input typed into any tile goes to that tile plus every other checked, *connected* device, as one `session:writeMany` IPC per keystroke. Terminal replies (cursor reports, device attributes, focus and mouse events, OSC/DCS replies) are filtered by `isTerminalReport` and go only to the tile they came from; keep that filter when touching input handling.
+- Broadcast runs the command on each checked, connected device over an SSH **exec channel** (not by typing into the shell), in parallel, with a per-device timeout from settings (`broadcastTimeoutSec`, default 30) and output capped at 64 KB. Results fill in per device as they arrive.
+
 ## Secrets and host keys
 
 - Passwords and key passphrases are asked for at connect time and passed straight through; they are never written to disk or kept in renderer state. `devices.json` holds only host, port, username and key *path*.
@@ -59,6 +65,7 @@ The Electron binary downloads itself on first run if missing (`node node_modules
 ## Gotchas
 
 - `ssh2`'s `utils.generateKeyPairSync('ed25519')` produces a malformed key about 1 time in 200 (OpenSSH rejects it too). Tests use `generateKeys()` from the test helper, which retries. Real keys from `ssh-keygen` are unaffected.
+- On Windows, stopping an `npm run dev:ssh` background task kills `npm` but can leave the `node` child listening on 2222+. A later server then fails with `EADDRINUSE` while the app silently talks to the old one. Check for and stop leftover `dev-ssh-server.mjs` processes before restarting it.
 - When driving the Electron window over CDP for checks, a window hidden behind others reports `visibilityState: hidden` and xterm stops repainting. Launch with `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows`, and use `--user-data-dir=<temp dir>` so test devices don't land in the real app data.
 
 ## Electron security rules

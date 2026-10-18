@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { utils } from 'ssh2'
 import type { Device } from '@shared/device'
-import type {
-  ConnectRequest,
-  ConnectResult,
-  SessionDataEvent,
-  SessionStatus,
-  SessionStatusEvent
+import {
+  MAX_EXEC_OUTPUT_BYTES,
+  type ConnectRequest,
+  type ConnectResult,
+  type ExecResult,
+  type SessionDataEvent,
+  type SessionStatus,
+  type SessionStatusEvent
 } from '@shared/session'
 import type { DeviceStore } from './deviceStore'
 import type { HostKeyCheck, KnownHosts } from './knownHosts'
@@ -95,6 +97,35 @@ export class SessionManager {
 
   write(deviceId: string, data: string): void {
     this.sessions.get(deviceId)?.transport.write(data)
+  }
+
+  // Same input to several devices (keystroke mirroring). Devices that are not
+  // connected are skipped; writes are buffered, so a slow device never blocks
+  // the others.
+  writeMany(deviceIds: readonly string[], data: string): void {
+    for (const id of new Set(deviceIds)) {
+      const session = this.sessions.get(id)
+      if (session?.status === 'connected') session.transport.write(data)
+    }
+  }
+
+  // Runs one command on one device and never throws: every failure becomes
+  // an { ok: false } result so one device can't break a broadcast.
+  async exec(deviceId: string, command: string, timeoutMs: number): Promise<ExecResult> {
+    const start = Date.now()
+    const session = this.sessions.get(deviceId)
+    if (!session || session.status !== 'connected') {
+      return { ok: false, message: 'Not connected', durationMs: 0 }
+    }
+    if (!session.transport.exec) {
+      return { ok: false, message: 'This connection type cannot run commands', durationMs: 0 }
+    }
+    try {
+      const out = await session.transport.exec(command, { timeoutMs, maxOutputBytes: MAX_EXEC_OUTPUT_BYTES })
+      return { ok: true, ...out, durationMs: Date.now() - start }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err), durationMs: Date.now() - start }
+    }
   }
 
   resize(deviceId: string, cols: number, rows: number): void {

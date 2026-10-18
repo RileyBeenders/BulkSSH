@@ -5,8 +5,9 @@
 //
 // Login with any username and the password "dev". The shell is a small fake
 // shell (no access to this machine): help, echo, whoami, hostname, date,
-// size, clear, exit. The host key is kept in .dev-ssh/ so it stays trusted
-// across restarts.
+// size, sleep, fail, fail-on, clear, exit. The same commands work as exec
+// commands (BulkSSH broadcast) and return real exit codes. The host key is
+// kept in .dev-ssh/ so it stays trusted across restarts.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -60,6 +61,18 @@ function startServer(port, hostname) {
           ok?.()
         })
         session.on('shell', (ok) => fakeShell(ok(), { username, hostname, size }))
+        session.on('exec', async (ok, _no, info) => {
+          const channel = ok()
+          const ctx = { username, hostname, size }
+          const code = await runCommand(
+            info.command.trim(),
+            ctx,
+            (text) => channel.write(text + '\n'),
+            (text) => channel.stderr.write(text + '\n')
+          )
+          channel.exit(code === 'exit' ? 0 : code)
+          channel.end()
+        })
       })
     })
   })
@@ -68,18 +81,29 @@ function startServer(port, hostname) {
 
 function fakeShell(channel, ctx) {
   const prompt = () => channel.write(`\x1b[32m${ctx.username}@${ctx.hostname}\x1b[0m:~$ `)
+  const out = (text) => channel.write(text.replace(/\n/g, '\r\n') + '\r\n')
+  const err = (text) => out(`\x1b[31m${text}\x1b[0m`)
   let line = ''
+  let busy = false
 
   channel.write(`Welcome to ${ctx.hostname} (BulkSSH dev server). Type "help".\r\n`)
   prompt()
 
-  channel.on('data', (data) => {
+  channel.on('data', async (data) => {
     for (const ch of data.toString()) {
+      if (busy) {
+        // Like a real terminal: Ctrl+C interrupts, other input is dropped.
+        if (ch === '\x03') busy = 'interrupted'
+        continue
+      }
       if (ch === '\r') {
         channel.write('\r\n')
-        const done = run(line.trim())
+        const cmd = line.trim()
         line = ''
-        if (done) return channel.close()
+        busy = true
+        const result = await runCommand(cmd, ctx, out, err, () => busy === 'interrupted')
+        busy = false
+        if (result === 'exit') return channel.close()
         prompt()
       } else if (ch === '\x7f' || ch === '\b') {
         if (line.length > 0) {
@@ -96,40 +120,68 @@ function fakeShell(channel, ctx) {
       }
     }
   })
+}
 
-  function run(cmd) {
-    const [name, ...args] = cmd.split(/\s+/)
-    const out = (text) => channel.write(text + '\r\n')
-    switch (name) {
-      case '':
-        break
-      case 'help':
-        out('Commands: help, echo <text>, whoami, hostname, date, size, clear, exit')
-        break
-      case 'echo':
-        out(args.join(' '))
-        break
-      case 'whoami':
-        out(ctx.username)
-        break
-      case 'hostname':
-        out(ctx.hostname)
-        break
-      case 'date':
-        out(new Date().toString())
-        break
-      case 'size':
-        out(`${ctx.size.cols} columns x ${ctx.size.rows} rows`)
-        break
-      case 'clear':
-        channel.write('\x1b[2J\x1b[H')
-        break
-      case 'exit':
-        out('logout')
-        return true
-      default:
-        out(`${name}: command not found`)
+// Returns an exit code, or 'exit' to end a shell session.
+async function runCommand(cmd, ctx, out, err, interrupted = () => false) {
+  const [name, ...args] = cmd.split(/\s+/)
+  const deviceNumber = Number(ctx.hostname.split('-').pop())
+  switch (name) {
+    case '':
+      return 0
+    case 'help':
+      out('Commands: help, echo <text>, whoami, hostname, date, size, sleep <s>,')
+      out('          fail [code], fail-on <device number> [code], clear, exit')
+      return 0
+    case 'echo':
+      out(args.join(' '))
+      return 0
+    case 'whoami':
+      out(ctx.username)
+      return 0
+    case 'hostname':
+      out(ctx.hostname)
+      return 0
+    case 'date':
+      out(new Date().toString())
+      return 0
+    case 'size':
+      out(`${ctx.size.cols} columns x ${ctx.size.rows} rows`)
+      return 0
+    case 'sleep': {
+      const end = Date.now() + Math.max(0, Number(args[0]) || 0) * 1000
+      while (Date.now() < end) {
+        if (interrupted()) {
+          out('^C')
+          return 130
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      return 0
     }
-    return false
+    case 'fail': {
+      const code = Number(args[0]) || 1
+      err(`fail: exiting with ${code}`)
+      return code
+    }
+    case 'fail-on': {
+      // Fails only on the given device, to try broadcasts with one bad device.
+      if (deviceNumber === Number(args[0])) {
+        const code = Number(args[1]) || 1
+        err(`fail-on: ${ctx.hostname} is failing with ${code}`)
+        return code
+      }
+      out(`fail-on: ${ctx.hostname} is fine`)
+      return 0
+    }
+    case 'clear':
+      out('\x1b[2J\x1b[H')
+      return 0
+    case 'exit':
+      out('logout')
+      return 'exit'
+    default:
+      err(`${name}: command not found`)
+      return 127
   }
 }

@@ -83,16 +83,16 @@ describe('KnownHosts', () => {
 describe('SettingsStore', () => {
   it('defaults to 6 per page, saves and reloads', () => {
     const path = join(dir, 'settings.json')
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 6 })
-    new SettingsStore(path).save({ pageSize: 9 })
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 9 })
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 6, broadcastTimeoutSec: 30 })
+    new SettingsStore(path).save({ pageSize: 9, broadcastTimeoutSec: 10 })
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 9, broadcastTimeoutSec: 10 })
   })
 
   it('rejects invalid settings without changing the saved ones', () => {
     const path = join(dir, 'settings.json')
     const store = new SettingsStore(path)
-    store.save({ pageSize: 4 })
-    expect(() => store.save({ pageSize: 100 })).toThrow('Devices per page')
-    expect(new SettingsStore(path).get()).toEqual({ pageSize: 4 })
+    store.save({ pageSize: 4, broadcastTimeoutSec: 30 })
+    expect(() => store.save({ pageSize: 100, broadcastTimeoutSec: 30 })).toThrow('Devices per page')
+    expect(new SettingsStore(path).get()).toEqual({ pageSize: 4, broadcastTimeoutSec: 30 })
   })
 })

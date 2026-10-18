@@ -15,9 +15,20 @@ interface Entry {
 const entries = new Map<string, Entry>()
 let unsubscribe: (() => void) | null = null
 
-// Shortcuts the app handles even while a terminal has focus.
+// Where typed input goes. The app replaces this to add keystroke mirroring.
+type InputHandler = (deviceId: string, data: string) => void
+let inputHandler: InputHandler = (deviceId, data) => bridge?.session.write(deviceId, data)
+
+export function setInputHandler(handler: InputHandler): void {
+  inputHandler = handler
+}
+
+// Shortcuts the app handles even while a terminal has focus:
+// Ctrl+PageUp/PageDown change page, Ctrl+Shift+M toggles mirroring.
 export function isAppShortcut(e: KeyboardEvent): boolean {
-  return e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')
+  if (!e.ctrlKey || e.altKey || e.metaKey) return false
+  if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) return true
+  return e.shiftKey && e.code === 'KeyM'
 }
 
 export function hasTerminal(deviceId: string): boolean {
@@ -74,7 +85,7 @@ function entry(deviceId: string): Entry {
     term.loadAddon(fit)
     // Returning false lets the key bubble to the app instead of the device.
     term.attachCustomKeyEventHandler((ev) => !isAppShortcut(ev))
-    term.onData((data) => bridge?.session.write(deviceId, data))
+    term.onData((data) => inputHandler(deviceId, data))
     term.onResize(({ cols, rows }) => bridge?.session.resize(deviceId, cols, rows))
     const el = document.createElement('div')
     el.className = 'term-host'

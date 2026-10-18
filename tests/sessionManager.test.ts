@@ -182,3 +182,66 @@ describe('SessionManager with key auth', () => {
     expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Cannot read key file') })
   })
 })
+
+describe('SessionManager mirroring and broadcast', () => {
+  async function connectTwo() {
+    server = await startTestServer({ username: 'alice', password: 'pw' })
+    const a = addDevice(server.port)
+    const b = addDevice(server.port)
+    await manager.connect({ deviceId: a.id, secret: 'pw', cols: 80, rows: 24 })
+    await manager.connect({ deviceId: b.id, secret: 'pw', cols: 80, rows: 24 })
+    return { a, b }
+  }
+
+  it('writes the same input to several devices and skips unknown ones', async () => {
+    const outputs: Record<string, string> = {}
+    manager = new SessionManager({
+      devices,
+      knownHosts,
+      confirmHostKey,
+      onStatus: () => {},
+      onData: (e) => (outputs[e.deviceId] = (outputs[e.deviceId] ?? '') + Buffer.from(e.data).toString())
+    })
+    const { a, b } = await connectTwo()
+    manager.writeMany([a.id, b.id, 'not-a-device', a.id], 'pwd')
+    await waitFor(() => !!outputs[a.id]?.includes('echo:pwd') && !!outputs[b.id]?.includes('echo:pwd'))
+    // Duplicate ids are written once.
+    expect(outputs[a.id].match(/echo:pwd/g)).toHaveLength(1)
+  })
+
+  it('runs a command and returns output and exit code', async () => {
+    const { a } = await connectTwo()
+    const result = await manager.exec(a.id, 'uptime', 5000)
+    expect(result).toMatchObject({ ok: true, code: 0, output: 'ran:uptime', truncated: false })
+  })
+
+  it('reports non-zero exit codes and includes stderr', async () => {
+    const { a } = await connectTwo()
+    const result = await manager.exec(a.id, 'exit 3', 5000)
+    expect(result).toMatchObject({ ok: true, code: 3 })
+    expect(result.ok && result.output).toContain('bye')
+    expect(result.ok && result.output).toContain('oops')
+  })
+
+  it('truncates very large output', async () => {
+    const { a } = await connectTwo()
+    const result = await manager.exec(a.id, 'big 100000', 5000)
+    expect(result.ok && result.output.length).toBe(64 * 1024)
+    expect(result.ok && result.truncated).toBe(true)
+  })
+
+  it('times out one device without affecting the others', async () => {
+    const { a, b } = await connectTwo()
+    const [slow, fast] = await Promise.all([manager.exec(a.id, 'hang', 300), manager.exec(b.id, 'uptime', 5000)])
+    expect(slow).toMatchObject({ ok: false, message: 'Timed out after 0 s' })
+    expect(fast).toMatchObject({ ok: true, code: 0 })
+    // The interactive shell of the timed-out device still works.
+    manager.write(a.id, 'still-here')
+    await waitFor(() => output.includes('echo:still-here'))
+  })
+
+  it('reports devices that are not connected', async () => {
+    const device = addDevice(1)
+    expect(await manager.exec(device.id, 'uptime', 5000)).toEqual({ ok: false, message: 'Not connected', durationMs: 0 })
+  })
+})
