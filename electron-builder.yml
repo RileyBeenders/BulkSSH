@@ -1,0 +1,33 @@
+appId: com.bulkssh.app
+productName: BulkSSH
+copyright: Copyright © 2026 Riley B
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# Only ssh2 (pure JavaScript) is needed at runtime. Its optional native
+# speed-ups (cpu-features, sshcrypto) are never built, so skip native rebuilds;
+# this also means no C++ build tools are needed to package the app.
+npmRebuild: false
+buildDependenciesFromSource: false
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+    - portable
+  # Not code-signed yet: Windows SmartScreen shows a warning on first run.
+nsis:
+  oneClick: false
+  perMachine: false # installs for the current user; no admin rights needed
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BulkSSH
+  # Saved devices, known hosts and passwords stay in %APPDATA%\bulkssh
+  # unless the user removes them.
+  deleteAppDataOnUninstall: false
+  artifactName: ${productName}-Setup-${version}.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

@@ -1,0 +1,139 @@
+import { FitAddon } from '@xterm/addon-fit'
+import { Terminal } from '@xterm/xterm'
+import { clipboardAction, isAppShortcut } from '@shared/keys'
+import { bridge } from './bridge'
+
+export { isAppShortcut }
+
+// One xterm.js terminal per device, kept outside React so scrollback survives
+// switching pages (and, later, between grid and focus views).
+
+interface Entry {
+  term: Terminal
+  fit: FitAddon
+  el: HTMLDivElement
+  opened: boolean
+}
+
+const entries = new Map<string, Entry>()
+let unsubscribe: (() => void) | null = null
+
+// Where typed input goes. The app replaces this to add keystroke mirroring.
+type InputHandler = (deviceId: string, data: string) => void
+let inputHandler: InputHandler = (deviceId, data) => bridge?.session.write(deviceId, data)
+
+export function setInputHandler(handler: InputHandler): void {
+  inputHandler = handler
+}
+
+// Pasted text goes through term.paste(), so it is handled exactly like typing:
+// bracketed-paste aware, and mirrored when mirroring is on.
+function copySelection(term: Terminal): void {
+  const text = term.getSelection()
+  if (text) void navigator.clipboard.writeText(text)
+  term.clearSelection()
+}
+
+function pasteInto(term: Terminal): void {
+  void navigator.clipboard.readText().then((text) => {
+    if (text) term.paste(text)
+  })
+}
+
+export function hasTerminal(deviceId: string): boolean {
+  return entries.has(deviceId)
+}
+
+export function getTerminal(deviceId: string): Terminal {
+  return entry(deviceId).term
+}
+
+export function focusTerminal(deviceId: string): void {
+  entries.get(deviceId)?.term.focus()
+}
+
+// Mounts the device's terminal into `container`; returns a detach function.
+export function attachTerminal(deviceId: string, container: HTMLElement): () => void {
+  const e = entry(deviceId)
+  container.appendChild(e.el)
+  if (!e.opened) {
+    e.term.open(e.el)
+    e.opened = true
+  }
+  const refit = (): void => {
+    if (container.clientWidth > 0 && container.clientHeight > 0) e.fit.fit()
+  }
+  refit()
+  const observer = new ResizeObserver(refit)
+  observer.observe(container)
+  return () => {
+    observer.disconnect()
+    e.el.remove()
+  }
+}
+
+// The device's scrollback as plain text, for export.
+export function bufferText(deviceId: string): string {
+  const term = entries.get(deviceId)?.term
+  if (!term) return ''
+  const buffer = term.buffer.normal
+  const lines: string[] = []
+  for (let i = 0; i < buffer.length; i++) {
+    const line = buffer.getLine(i)
+    if (!line) continue
+    // Wrapped rows continue the previous line instead of starting a new one.
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += line.translateToString(true)
+    else lines.push(line.translateToString(true))
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines.join('\n') + '\n'
+}
+
+export function disposeTerminal(deviceId: string): void {
+  entries.get(deviceId)?.term.dispose()
+  entries.delete(deviceId)
+}
+
+function entry(deviceId: string): Entry {
+  if (!unsubscribe && bridge) {
+    unsubscribe = bridge.session.onData(({ deviceId: id, data }) => entries.get(id)?.term.write(data))
+  }
+  let e = entries.get(deviceId)
+  if (!e) {
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: '"Cascadia Mono", Consolas, monospace',
+      fontSize: 13,
+      scrollback: 5000,
+      theme: { background: '#0f1115' }
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    // Returning false keeps the key from the device: app shortcuts bubble up
+    // to the app, clipboard keys are handled here.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (isAppShortcut(ev)) return false
+      const action = clipboardAction(ev, term.hasSelection())
+      if (!action) return true
+      if (ev.type === 'keydown') {
+        ev.preventDefault() // no second, native paste (Shift+Insert)
+        if (action === 'copy') copySelection(term)
+        else pasteInto(term)
+      }
+      return false
+    })
+    term.onData((data) => inputHandler(deviceId, data))
+    term.onResize(({ cols, rows }) => bridge?.session.resize(deviceId, cols, rows))
+    const el = document.createElement('div')
+    el.className = 'term-host'
+    // Right-click: copy the selection if there is one, otherwise paste.
+    el.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault()
+      if (term.hasSelection()) copySelection(term)
+      else pasteInto(term)
+    })
+    e = { term, fit, el, opened: false }
+    entries.set(deviceId, e)
+  }
+  return e
+}

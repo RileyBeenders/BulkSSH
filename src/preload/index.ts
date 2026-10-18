@@ -1,0 +1,66 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { Device, DeviceInput } from '@shared/device'
+import type { Settings } from '@shared/settings'
+import type {
+  ConnectRequest,
+  ConnectResult,
+  ExecResult,
+  SessionDataEvent,
+  SessionStatusEvent
+} from '@shared/session'
+
+// The only bridge between the renderer and the main process.
+// Expose narrow, typed functions here; never expose ipcRenderer itself.
+
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const wrapped = (_e: IpcRendererEvent, payload: T): void => listener(payload)
+  ipcRenderer.on(channel, wrapped)
+  return () => ipcRenderer.removeListener(channel, wrapped)
+}
+
+const api = {
+  getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
+  settings: {
+    get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+    save: (settings: Settings): Promise<Settings> => ipcRenderer.invoke('settings:save', settings)
+  },
+
+  credentials: {
+    status: (): Promise<{ available: boolean; saved: string[] }> => ipcRenderer.invoke('credentials:status'),
+    forget: (deviceId: string): Promise<void> => ipcRenderer.invoke('credentials:forget', deviceId)
+  },
+
+  files: {
+    // Asks where to save (native dialog); resolves to the path, or null if cancelled.
+    saveText: (suggestedName: string, text: string): Promise<string | null> =>
+      ipcRenderer.invoke('files:saveText', suggestedName, text)
+  },
+
+  devices: {
+    list: (): Promise<Device[]> => ipcRenderer.invoke('devices:list'),
+    save: (input: DeviceInput): Promise<Device> => ipcRenderer.invoke('devices:save', input),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('devices:delete', id),
+    removeMany: (ids: string[]): Promise<void> => ipcRenderer.invoke('devices:deleteMany', ids),
+    pickKeyFile: (): Promise<string | null> => ipcRenderer.invoke('devices:pickKeyFile')
+  },
+
+  session: {
+    connect: (req: ConnectRequest): Promise<ConnectResult> => ipcRenderer.invoke('session:connect', req),
+    close: (deviceId: string): Promise<void> => ipcRenderer.invoke('session:close', deviceId),
+    // Sessions that are already live, e.g. after the window was reloaded.
+    list: (): Promise<SessionStatusEvent[]> => ipcRenderer.invoke('session:list'),
+    write: (deviceId: string, data: string): void => ipcRenderer.send('session:write', deviceId, data),
+    writeMany: (deviceIds: string[], data: string): void => ipcRenderer.send('session:writeMany', deviceIds, data),
+    exec: (deviceId: string, command: string): Promise<ExecResult> =>
+      ipcRenderer.invoke('session:exec', deviceId, command),
+    resize: (deviceId: string, cols: number, rows: number): void =>
+      ipcRenderer.send('session:resize', deviceId, cols, rows),
+    onData: (listener: (e: SessionDataEvent) => void) => subscribe('session:data', listener),
+    onStatus: (listener: (e: SessionStatusEvent) => void) => subscribe('session:status', listener)
+  }
+}
+
+export type BulkSshApi = typeof api
+
+contextBridge.exposeInMainWorld('bulkssh', api)

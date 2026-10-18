@@ -1,0 +1,40 @@
+name: Build Windows packages
+
+# Builds the installer and portable exe and attaches them to the workflow
+# run. Run it by hand (Actions tab -> Run workflow) or by pushing a tag like
+# v0.1.0. It does not publish a GitHub release.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      # Install scripts are skipped, as in CI: electron-builder downloads the
+      # Electron runtime it packages, and ssh2's native extras are unused.
+      - run: npm ci --ignore-scripts
+
+      - run: npm test
+
+      - run: npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BulkSSH-windows
+          path: |
+            dist/*.exe
+          if-no-files-found: error
